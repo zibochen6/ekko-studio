@@ -27,8 +27,9 @@ describe('desktop app icon', () => {
         }
       }
       expect(alpha(padding, padding)).toBeLessThan(32)
-      expect(alpha(size / 2, padding)).toBe(255)
-      expect(alpha(size / 2, size / 2)).toBe(255)
+      // Preserve the artwork's antialiased bevel rather than imposing a mask.
+      expect(alpha(size / 2, Math.max(padding + 1, Math.round(size / 8)))).toBeGreaterThan(240)
+      expect(alpha(size / 2, size / 2)).toBeGreaterThan(240)
     }
     expect(readFileSync(resolve('packages/desktop/build/iconLinux.png')))
       .toEqual(readFileSync(resolve('packages/desktop/build/icons/512x512.png')))
@@ -50,6 +51,18 @@ describe('desktop app icon', () => {
     expect(icns.subarray(0, 4).toString()).toBe('icns')
     expect([...ico.subarray(0, 4)]).toEqual([0, 0, 1, 0])
     expect(ico.readUInt16LE(4)).toBeGreaterThanOrEqual(7)
+  })
+
+  it('uses one transparent master for the web brand and built-in Bot logos', async () => {
+    const logo = readFileSync(resolve('packages/client/public/logo.png'))
+    for (const asset of ['logo-original.png', 'coding-agents/ekko-agent.png', 'coding-agents/hermes.png']) {
+      expect(readFileSync(resolve('packages/client/public', asset))).toEqual(logo)
+    }
+    expect(await sharp(resolve('packages/desktop/build/brand/master.png')).metadata())
+      .toMatchObject({ hasAlpha: true })
+    const { data, info } = await sharp(logo).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+    expect(data[3]).toBe(0)
+    expect(data[((info.height / 2) * info.width + info.width / 2) * 4 + 3]).toBeGreaterThan(240)
   })
 
   it('uses an unmasked Icon Composer source on macOS and separate Windows and Linux assets', () => {

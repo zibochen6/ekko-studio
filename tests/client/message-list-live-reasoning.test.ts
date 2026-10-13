@@ -96,22 +96,20 @@ describe('MessageList live reasoning', () => {
     vi.useRealTimers()
   })
 
-  it('updates the thinking logo with the active agent and preserves the Ekko animation', async () => {
+  it('uses each active agent image while thinking, including the new Ekko brand', async () => {
     const wrapper = mountMessageList([])
     const chatStore = useChatStore()
     for (const [agent, src] of [
       ['hermes', '/coding-agents/hermes.png'],
       ['codex', '/coding-agents/codex-openai.png'],
       ['claude-code', '/coding-agents/claude-code.svg'],
-      ['ekko-agent', 'thinking.gif'],
+      ['ekko-agent', '/coding-agents/ekko-agent.png'],
       ['pi', '/coding-agents/pi.svg'],
     ]) {
       chatStore.activeSession = { ...makeSession([]), agent }
       await nextTick()
       expect(wrapper.get('.thinking-avatar').attributes('src')).toContain(src)
-      expect(wrapper.get('.thinking-avatar').classes()).toContain(
-        agent === 'ekko-agent' ? 'thinking-avatar--animated' : 'thinking-avatar--logo',
-      )
+      expect(wrapper.get('.thinking-avatar').classes()).toContain('thinking-avatar--logo')
     }
     wrapper.unmount()
   })

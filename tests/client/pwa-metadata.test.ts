@@ -6,11 +6,11 @@ describe('PWA metadata', () => {
     const html = readFileSync('packages/client/index.html', 'utf8')
 
     expect(html).toContain('rel="manifest" href="/manifest.webmanifest"')
-    expect(html).toContain('rel="apple-touch-icon" href="/logo.png"')
+    expect(html).toContain('rel="apple-touch-icon" href="/apple-touch-icon.png"')
     expect(html).toContain('name="apple-mobile-web-app-title" content="Ekko Studio"')
   })
 
-  it('ships a standalone web manifest with the Hermes icon', () => {
+  it('ships separate transparent and maskable brand icons', () => {
     const manifest = JSON.parse(readFileSync('packages/client/public/manifest.webmanifest', 'utf8'))
 
     expect(manifest.name).toBe('Ekko Studio')
@@ -21,7 +21,14 @@ describe('PWA metadata', () => {
       expect.objectContaining({
         src: '/logo.png',
         type: 'image/png',
-        purpose: 'any maskable',
+        sizes: '512x512',
+        purpose: 'any',
+      }),
+      expect.objectContaining({
+        src: '/logo-maskable.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'maskable',
       }),
     ]))
   })

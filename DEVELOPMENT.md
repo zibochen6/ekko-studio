@@ -19,6 +19,14 @@ npm run build
 - `npm run test:e2e` runs Playwright browser tests against a mocked BFF API.
 - `npm run build` type-checks and builds both client and server.
 
+The application brand master lives at `packages/desktop/build/brand/master.png`.
+After replacing that transparent artwork, run
+`node packages/desktop/scripts/generate-rounded-icons.mjs` to regenerate desktop,
+tray, favicon, PWA and built-in Agent images together. The source already has a
+rounded tile; do not add another mask. Icon Composer receives an opaque layer
+and owns the macOS exterior shape. Rebuild the desktop bundle to verify system
+icons; never patch an installed, running app's resources in place.
+
 ## Architecture
 
 - Frontend code lives under `packages/client/src`.
