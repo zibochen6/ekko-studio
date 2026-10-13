@@ -36,6 +36,40 @@ should not duplicate server persistence rules.
 - Runtime data directories must also live under the Web UI home, not beside built `dist` assets.
 - Profile-scoped Hermes data should use existing profile helpers instead of manually joining paths.
 
+### Bot Workspace
+
+The default Hermes chat UI presents each local Profile as a Bot. This workspace
+is a navigation layer, not a new persisted workspace entity; session `workspace`
+still means the working directory. The Studio tools entry preserves the other
+agent runtimes and management pages (`?studio=1` retains their chat entry).
+
+Bot display names and descriptions live in Web UI `profile-metadata` beside the
+existing avatar metadata. They never rename the Hermes Profile or alter its
+personality. Avatar reset removes only avatar files. Creating a Bot creates a
+blank Profile and may copy one explicitly selected model connection, not a
+Profile's memories, sessions, tools, skills, personality or scheduled jobs.
+New Bots use profile-local credentials; existing Profiles keep their historical
+credential fallback behavior for compatibility.
+
+The client retains session entities separately from each Profile's visible
+history. Socket connections are keyed by server, authenticated identity,
+Profile and transport. Changing the visible Bot does not stop a running task or
+invoke the global Hermes switch endpoint. Sends, uploads, models and controls
+retain their initiating Profile/session context, with stale-response guards on
+visible settings and lists. The server checks session ownership on run, resume,
+queue and control operations. Drafts and recent selections are scoped to the
+account and Profile; tab-local selections keep simultaneous windows independent.
+Old session deep links resolve their owner before selecting the visible Bot.
+
+Local discovery reads the configured `HERMES_HOME` (default `~/.hermes`) and its
+direct `profiles/` directories. The Bot roster refreshes on returning to the
+window and offers an explicit rescan; it does not aggregate arbitrary independent
+Hermes installations or remote hosts. Skills and scheduled-job links resolve
+their explicit Profile before loading an editor. Their local state is isolated
+per Profile, while deliberately shared external skill directories remain shared.
+Kanban retains its existing shared boards and Profile assignees; the workspace
+labels that entry as a shared board rather than implying a private Bot database.
+
 ## Server Structure
 
 Server code is separated by business ownership under `modules/studio`,

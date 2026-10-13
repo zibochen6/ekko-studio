@@ -79,6 +79,7 @@ describe('chat session ordering', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    sessionStorage.clear()
     setActivePinia(createPinia())
   })
 
@@ -194,7 +195,7 @@ describe('chat session ordering', () => {
     )
   })
 
-  it('does not retain a local-only chat outside the requested profile', async () => {
+  it('retains another Bot draft in the cache without selecting it', async () => {
     vi.mocked(fetchSessions)
       .mockResolvedValueOnce([
         { ...makeSession('research-session', { started_at: 1000 }), profile: 'research' },
@@ -206,9 +207,25 @@ describe('chat session ordering', () => {
 
     await store.loadSessions('research')
 
-    expect(store.sessions.map(session => session.id)).toEqual(['research-session'])
-    expect(store.sessions.some(session => session.id === localSession.id)).toBe(false)
+    expect(store.sessions.filter(session => session.profile === 'research').map(session => session.id)).toEqual(['research-session'])
+    expect(store.sessions.some(session => session.id === localSession.id)).toBe(true)
     expect(store.activeSessionId).toBe('research-session')
+  })
+
+  it('restores the recent session of each Bot independently', async () => {
+    const byProfile = {
+      default: [makeSession('a1', { started_at: 900 }), makeSession('a2', { started_at: 800 })],
+      research: [{ ...makeSession('b1', { started_at: 1000 }), profile: 'research' }],
+    }
+    vi.mocked(fetchSessions).mockImplementation(async (source, _agent, profile) => source === 'global_agent' ? [] : byProfile[profile as keyof typeof byProfile] as any)
+    const store = useChatStore()
+    await store.loadSessions('default')
+    await store.switchSession('a2')
+    await store.loadSessions('research')
+    expect(store.activeSessionId).toBe('b1')
+    await store.loadSessions('default')
+    expect(store.activeSessionId).toBe('a2')
+    expect(store.sessions.map(session => session.id)).toEqual(expect.arrayContaining(['a1', 'a2', 'b1']))
   })
 
   it('rebinds the active session after a stale list refresh during an explicit switch', async () => {
@@ -237,5 +254,41 @@ describe('chat session ordering', () => {
 
     expect(store.activeSessionId).toBe('session-b')
     expect(store.activeSession).toBe(store.sessions.find(session => session.id === 'session-b'))
+  })
+
+  it('retains session entities while hiding entries absent from the latest Bot list', async () => {
+    vi.mocked(fetchSessions).mockImplementation(async source => source === 'global_agent' ? [] : [
+      makeSession('a1', { started_at: 900 }), makeSession('a2', { started_at: 800 }),
+    ] as any)
+    const store = useChatStore()
+    await store.loadSessions('default')
+    const a2 = store.sessions.find(session => session.id === 'a2')
+    vi.mocked(fetchSessions).mockImplementation(async source => source === 'global_agent' ? [] : [makeSession('a1', { started_at: 900 })] as any)
+    await store.loadSessions('default')
+    expect(store.sessions.find(session => session.id === 'a2')).toBe(a2)
+    expect(store.isSessionListed('a2', 'default')).toBe(false)
+    expect(store.isSessionListed('a1', 'default')).toBe(true)
+
+    // A search/deep link can explicitly select a cached item outside the list page.
+    await store.loadSessions('default', 'a2')
+    expect(store.activeSessionId).toBe('a2')
+    expect(store.isSessionListed('a2', 'default')).toBe(true)
+  })
+
+  it('ignores an old passive refresh after a newer Bot list finishes', async () => {
+    const pending: Array<(sessions: any[]) => void> = []
+    vi.mocked(fetchSessions).mockImplementation(() => new Promise(resolve => pending.push(resolve)))
+    const store = useChatStore()
+    const refresh = store.refreshSessionListOnly('default')
+    const load = store.loadSessions('default')
+    pending[2]([makeSession('new-session', { started_at: 2000 })])
+    pending[3]([])
+    await load
+    pending[0]([makeSession('old-session', { started_at: 1000 })])
+    pending[1]([])
+    await refresh
+    expect(store.activeSessionId).toBe('new-session')
+    expect(store.sessions.map(session => session.id)).toEqual(['new-session'])
+    expect(store.isSessionListed('new-session', 'default')).toBe(true)
   })
 })

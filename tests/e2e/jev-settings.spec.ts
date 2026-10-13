@@ -191,6 +191,7 @@ test(`configures JEV memory, skills and browser per Profile at ${viewport.width}
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => settings.research.ekkoSkillsEnabled).toBe(false)
   await page.reload()
+  await expect(page.locator('.models-view')).toHaveAttribute('aria-busy', 'false', { timeout: 15_000 })
   await expect(matchSwitch).not.toBeChecked()
   await expect(verifySwitch).not.toBeChecked()
   expect(settings.research.browserMatchCandidateLimit).toBe(12)

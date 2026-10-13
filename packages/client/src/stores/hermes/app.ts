@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, onScopeDispose } from 'vue'
+import { onAuthInvalidated } from '@/api/auth-invalidation'
 import {
   fetchAvailableModels,
   addCustomModel as persistCustomModel,
@@ -14,12 +15,11 @@ import {
   type ModelVisibilityRule,
 } from '@/api/hermes/system'
 import { checkHealth, triggerUpdate } from '@/api/studio/system'
-import { hasApiKey } from '@/api/client'
+import { hasApiKey, getActiveProfileName } from '@/api/client'
 
 const WEB_UI_VERSION = __APP_VERSION__
 
 const SIDEBAR_COLLAPSED_KEY = 'hermes_sidebar_collapsed'
-const ACTIVE_PROFILE_STORAGE_KEY = 'hermes_active_profile_name'
 const MODELS_CACHE_TTL_MS = 30000
 
 export const useAppStore = defineStore('app', () => {
@@ -50,8 +50,28 @@ export const useAppStore = defineStore('app', () => {
   const streamEnabled = ref(true)
   const sessionPersistence = ref(true)
   const maxTokens = ref(4096)
-  let modelsLoadPromise: Promise<void> | null = null
-  let modelsLastRequestedAt = 0
+  const modelsLoadPromises = new Map<string, Promise<void>>()
+  const modelsLastRequestedAt = new Map<string, number>()
+  const modelsRequestSequences = new Map<string, number>()
+  const modelsByProfile = new Map<string, AvailableModelsResponse>()
+  let modelsAppliedProfile = ''
+  let modelsAuthGeneration = 0
+  const unsubscribeAuth = onAuthInvalidated(() => {
+    modelsAuthGeneration++
+    modelsLoadPromises.clear()
+    modelsLastRequestedAt.clear()
+    modelsRequestSequences.clear()
+    modelsAppliedProfile = ''
+    modelsByProfile.clear()
+    modelGroups.value = []
+    profileModelGroups.value = []
+    selectedModel.value = ''
+    selectedProvider.value = ''
+    customModels.value = {}
+    modelAliases.value = {}
+    modelVisibility.value = {}
+  })
+  onScopeDispose(unsubscribeAuth)
 
   async function doUpdate(): Promise<boolean> {
     updating.value = true
@@ -105,7 +125,7 @@ export const useAppStore = defineStore('app', () => {
       if (stillAvailable) return
     }
 
-    const activeProfileName = localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY) || ''
+    const activeProfileName = getActiveProfileName() || ''
     const activeProfileModels = activeProfileName
       ? profileModelGroups.value.find(entry => entry.profile === activeProfileName)
       : undefined
@@ -159,32 +179,63 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function loadModels(force = false, opts: { preserveSelection?: boolean } = {}) {
+  async function loadModels(force = false, opts: { preserveSelection?: boolean; profile?: string } = {}) {
     if (!hasApiKey()) return
-    if (!force && modelsLoadPromise) return modelsLoadPromise
-    if (!force && modelsLastRequestedAt > 0 && Date.now() - modelsLastRequestedAt < MODELS_CACHE_TTL_MS) return
-    modelsLastRequestedAt = Date.now()
-    modelsLoadPromise = (async () => {
+    const profile = opts.profile || getActiveProfileName() || 'default'
+    if (modelsAppliedProfile !== profile && (getActiveProfileName() || 'default') === profile) {
+      modelsAppliedProfile = profile
+      const cached = modelsByProfile.get(profile)
+      if (cached) applyAvailableModelsResponse(cached)
+      else {
+        selectedModel.value = ''
+        selectedProvider.value = ''
+        modelGroups.value = []
+        profileModelGroups.value = []
+        customModels.value = {}
+        modelAliases.value = {}
+        modelVisibility.value = {}
+      }
+    }
+    if (!force && modelsLoadPromises.has(profile)) return modelsLoadPromises.get(profile)
+    const requestedAt = modelsLastRequestedAt.get(profile) || 0
+    if (!force && requestedAt > 0 && Date.now() - requestedAt < MODELS_CACHE_TTL_MS) return
+    modelsLastRequestedAt.set(profile, Date.now())
+    const sequence = (modelsRequestSequences.get(profile) || 0) + 1
+    modelsRequestSequences.set(profile, sequence)
+    const authGeneration = modelsAuthGeneration
+    const pending = (async () => {
       try {
-        const res = await fetchAvailableModels()
-        applyAvailableModelsResponse(res, opts)
+        const res = await fetchAvailableModels(profile)
+        if (authGeneration !== modelsAuthGeneration || sequence !== modelsRequestSequences.get(profile)) return
+        modelsByProfile.set(profile, res)
+        if ((getActiveProfileName() || 'default') === profile) {
+          modelsAppliedProfile = profile
+          applyAvailableModelsResponse(res, opts)
+        }
       } catch {
-        // ignore
+        // Keep a failed profile retryable without changing another Bot's model list.
+        if (sequence === modelsRequestSequences.get(profile)) modelsLastRequestedAt.delete(profile)
       } finally {
-        modelsLoadPromise = null
+        if (authGeneration === modelsAuthGeneration && sequence === modelsRequestSequences.get(profile)) modelsLoadPromises.delete(profile)
       }
     })()
-    return modelsLoadPromise
+    modelsLoadPromises.set(profile, pending)
+    return pending
   }
 
-  async function waitForModelsForRun(timeoutMs = 15000) {
+  async function waitForModelsForRun(timeoutMs = 15000, profile = getActiveProfileName() || 'default') {
     if (!hasApiKey()) return
-    const pending = modelsLoadPromise || (modelsLastRequestedAt === 0 ? loadModels() : null)
+    const pending = modelsLoadPromises.get(profile) || (!modelsByProfile.has(profile) ? loadModels(false, { profile }) : null)
     if (!pending) return
     await Promise.race([
       pending,
       new Promise<void>(resolve => setTimeout(resolve, timeoutMs)),
     ])
+  }
+
+  function modelsForProfile(profile: string) {
+    const response = modelsByProfile.get(profile)
+    return response?.profiles?.find(entry => entry.profile === profile) || response
   }
 
   async function reloadModels(opts: { preserveSelection?: boolean } = {}) {
@@ -239,17 +290,26 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function switchModel(modelId: string, providerOverride?: string) {
+    const profile = getActiveProfileName() || 'default'
     try {
       // Find the group containing this model to get provider info
       const group = modelGroups.value.find(g => g.models.includes(modelId))
       const provider = providerOverride || group?.provider || ''
       await updateDefaultModel({ default: modelId, provider })
+      const cached = modelsByProfile.get(profile)
+      if (cached) {
+        cached.default = modelId
+        cached.default_provider = provider
+        const entry = cached.profiles?.find(entry => entry.profile === profile)
+        if (entry) { entry.default = modelId; entry.default_provider = provider }
+      }
+      if ((getActiveProfileName() || 'default') !== profile) return
       selectedModel.value = modelId
       selectedProvider.value = provider || ''
       // Track as custom if not already in the server-fetched list
       if (provider && !modelGroups.value.find(g => g.provider === provider)?.models.includes(modelId)) {
         const res = await persistCustomModel({ provider, model: modelId })
-        customModels.value = res.custom_models || {}
+        if ((getActiveProfileName() || 'default') === profile) customModels.value = res.custom_models || {}
       }
     } catch (err: any) {
       console.error('Failed to switch model:', err)
@@ -371,6 +431,7 @@ export const useAppStore = defineStore('app', () => {
     checkConnection,
     loadModels,
     waitForModelsForRun,
+    modelsForProfile,
     reloadModels,
     applyAvailableModelsResponse,
     switchModel,

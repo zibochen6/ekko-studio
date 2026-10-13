@@ -62,6 +62,9 @@ extraResources:
     to: "webui/node_modules"
     filter:
       - "**/*"
+      # Local browser checks create per-port Vite caches; these are never runtime assets.
+      - "!.vite/**"
+      - "!.vite-temp/**"
       # Drop other-platform node-pty prebuilds (saves ~45MB)
       - "!node-pty/prebuilds/!(${platform}-${arch})/**"
       # Linux has no bundled prebuild and loads the native module compiled by

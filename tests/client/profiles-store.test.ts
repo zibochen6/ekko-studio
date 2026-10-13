@@ -12,6 +12,7 @@ const mockProfilesApi = vi.hoisted(() => ({
   exportProfile: vi.fn(),
   importProfile: vi.fn(),
   updateProfileAvatar: vi.fn(),
+  updateProfileIdentity: vi.fn(),
   deleteProfileAvatar: vi.fn(),
 }))
 
@@ -25,9 +26,30 @@ vi.mock('@/api/agent-status', () => mockAgentStatusApi)
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 describe('Profiles Store', () => {
+  it('keeps a window’s selected Bot when another window changes the shared preference', async () => {
+    localStorage.setItem('hermes_active_profile_name', 'default')
+    sessionStorage.setItem('hermes_active_profile_name', 'research')
+    const store = useProfilesStore()
+    expect(store.activeProfileName).toBe('research')
+    localStorage.setItem('hermes_active_profile_name', 'writer')
+    expect(store.activeProfileName).toBe('research')
+    localStorage.clear()
+  })
+  it('updates display identity without renaming the internal Profile or clearing its avatar', async () => {
+    const store = useProfilesStore()
+    const avatar = { type: 'generated' as const, seed: 'research' }
+    store.profiles = [{ name: 'research', model: '', alias: '', active: true, avatar }]
+    store.activeProfile = store.profiles[0]
+    mockProfilesApi.updateProfileIdentity.mockResolvedValue({ displayName: '研研', description: '研究搭档', updatedAt: 7 })
+    await store.updateIdentity('research', { displayName: '研研', description: '研究搭档' })
+    expect(store.profiles[0]).toMatchObject({ name: 'research', displayName: '研研', description: '研究搭档', avatar })
+    expect(store.activeProfile?.displayName).toBe('研研')
+    expect(mockProfilesApi.renameProfile).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    sessionStorage.clear()
     mockAgentStatusApi.fetchAgentStatusSnapshot.mockResolvedValue({
       revision: 1,
       updatedAt: new Date(0).toISOString(),

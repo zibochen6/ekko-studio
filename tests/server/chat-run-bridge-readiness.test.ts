@@ -115,7 +115,8 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
-  readConfigYamlForProfile: vi.fn(async () => ({ mcp_servers: { 'ekko-studio-interaction': { command: 'studio' }, 'ekko-studio-use': { command: 'studio' } } })),
+  usesProfileOnlyCredentials: vi.fn(() => true),
+  readConfigYamlForProfile: vi.fn(async () => ({ model: { default: 'gpt-test', provider: 'openai' }, mcp_servers: { 'ekko-studio-interaction': { command: 'studio' }, 'ekko-studio-use': { command: 'studio' } } })),
   getActiveProfileName: vi.fn(() => 'default'),
   getProfileDir: vi.fn(() => '/tmp/hermes-default'),
   listProfileNamesFromDisk: vi.fn(() => ['default', 'research']),
@@ -189,6 +190,36 @@ describe('ChatRunSocket global pending interactions', () => {
         session_id: 'session-running',
         status: 'completed',
       }),
+    })
+  })
+
+  it('keeps background delegations visible in activity snapshots until their delivery completes', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { emitted, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const state = {
+      messages: [], events: [], queue: [], isWorking: false, profile: 'default',
+      backgroundDelegations: { delegated: { status: 'delivering' } },
+    }
+    ;(server as any).sessionMap.set('session-background', state)
+    ;(server as any).onConnection(socket)
+
+    expect(socket.emit).toHaveBeenCalledWith('session.activity.snapshot', expect.objectContaining({
+      sessions: [{ session_id: 'session-background', status: 'running' }],
+    }))
+    ;(server as any).emitSessionActivity('default', 'run.completed', {
+      session_id: 'session-background', queue_remaining: 0,
+    })
+    expect(emitted.at(-1)).toMatchObject({
+      event: 'session.activity', payload: { session_id: 'session-background', status: 'running' },
+    })
+
+    state.backgroundDelegations.delegated.status = 'completed'
+    ;(server as any).emitSessionActivity('default', 'delegation.updated', {
+      session_id: 'session-background', background_pending: 0,
+    })
+    expect(emitted.at(-1)).toMatchObject({
+      event: 'session.activity', payload: { session_id: 'session-background', status: 'completed' },
     })
   })
 
@@ -1286,8 +1317,37 @@ describe('session upload provenance at the socket boundary', () => {
     const run = vi.spyOn(server as any, 'handleRun').mockResolvedValue(undefined)
     ;(server as any).onConnection(socket)
     await handlers.get('run')!({ session_id: 'research-session', input: [{ type: 'file', path: '/uploads/private.txt' }] })
-    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Profile "research" is not available on this connection' }))
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Session profile does not match this connection' }))
     expect(recordSessionUploadAttachmentsMock).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it.each(['plain message', '/model openai/gpt-test', [{ type: 'text', text: 'queued' }]])('rejects mismatched session ownership before every run path: %j', async input => {
+    getSessionMock.mockReturnValue({ id: 'research-session', profile: 'research', source: 'cli', model: 'gpt-test', provider: 'openai' })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const run = vi.spyOn(server as any, 'handleRun').mockResolvedValue(undefined)
+    ;(server as any).onConnection(socket)
+    ;(server as any).sessionMap.set('research-session', { profile: 'research', isWorking: true, queue: [], events: [] })
+    await handlers.get('run')!({ session_id: 'research-session', profile: 'default', input })
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Session profile does not match this connection' }))
+    expect((server as any).sessionMap.get('research-session').queue).toHaveLength(0)
+    expect(run).not.toHaveBeenCalled()
+    expect(recordSessionUploadAttachmentsMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a blank Bot without inheriting a global model connection', async () => {
+    getSessionMock.mockReturnValue(undefined)
+    const { readConfigYamlForProfile } = await import('../../packages/server/src/modules/studio/public/profile-config')
+    vi.mocked(readConfigYamlForProfile).mockResolvedValueOnce({})
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const run = vi.spyOn(server as any, 'handleRun').mockResolvedValue(undefined)
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')!({ session_id: 'new-bot-session', profile: 'default', input: 'hello', source: 'cli' })
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: 'Configure a model connection for this Bot before sending a message' }))
     expect(run).not.toHaveBeenCalled()
   })
 

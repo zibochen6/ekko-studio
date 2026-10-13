@@ -68,7 +68,7 @@ test('groups sessions by category and persists collapsed groups', async ({ page 
   })
   await mockChatSocket(page)
 
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
 
   const recentHeader = page.locator('.session-group-header').filter({ hasText: 'Recent' })
   const recentToggle = recentHeader.locator('.session-group-toggle')
@@ -153,7 +153,7 @@ test('keeps manually collapsed categories closed across polling and foreground r
   await expect(workChevron).toHaveClass(/collapsed/)
   await expect.poll(() => page.evaluate(() => localStorage.getItem('hermes_chat_collapsed_categories')))
     .toContain('category-1')
-  await expect(page).toHaveURL(/\/hermes\/session\/work-session$/)
+  await expect(page).toHaveURL(/\/hermes\/session\/work-session(?:\?.*)?$/)
 
   // Ordinary navigation still reveals the selected session's category.
   await page.goto('/#/hermes/session/notes-session')
@@ -177,7 +177,7 @@ test('selects a recent session without expanding its collapsed category', async 
   const workHeader = page.locator('.session-group-header').filter({ hasText: 'Work' })
   const recentSession = page.getByRole('link', { name: /Project Alpha/ }).first()
   await page.getByRole('link', { name: /General Notes/ }).first().click()
-  await expect(page).toHaveURL(/\/hermes\/session\/uncategorized-session$/)
+  await expect(page).toHaveURL(/\/hermes\/session\/uncategorized-session(?:\?.*)?$/)
 
   await expect(workHeader).toBeVisible()
   await workHeader.click()
@@ -187,7 +187,7 @@ test('selects a recent session without expanding its collapsed category', async 
 
   await recentSession.click()
 
-  await expect(page).toHaveURL(/\/hermes\/session\/work-session$/)
+  await expect(page).toHaveURL(/\/hermes\/session\/work-session(?:\?.*)?$/)
   await expect(recentSession).toHaveClass(/active/)
   await expect(page.getByRole('link', { name: /Project Alpha/ })).toHaveCount(1)
   await expect.poll(() => page.evaluate(() => localStorage.getItem('hermes_chat_collapsed_categories')))
@@ -195,7 +195,7 @@ test('selects a recent session without expanding its collapsed category', async 
 
   await page.reload()
 
-  await expect(page).toHaveURL(/\/hermes\/session\/work-session$/)
+  await expect(page).toHaveURL(/\/hermes\/session\/work-session(?:\?.*)?$/)
   await expect(page.getByRole('link', { name: /Project Alpha/ }).first()).toHaveClass(/active/)
   await expect(page.getByRole('link', { name: /Project Alpha/ })).toHaveCount(1)
   await expect.poll(() => page.evaluate(() => localStorage.getItem('hermes_chat_collapsed_categories')))
@@ -220,11 +220,11 @@ test('persists the collapsed recent group across reloads without changing the ac
 
   await recentToggle.click()
   await expect(recentToggle).toHaveAttribute('aria-expanded', 'false')
-  await expect(page).toHaveURL(/\/hermes\/session\/work-session$/)
+  await expect(page).toHaveURL(/\/hermes\/session\/work-session(?:\?.*)?$/)
 
   await page.reload()
   await expect(recentToggle).toHaveAttribute('aria-expanded', 'false')
-  await expect(page).toHaveURL(/\/hermes\/session\/work-session$/)
+  await expect(page).toHaveURL(/\/hermes\/session\/work-session(?:\?.*)?$/)
   await expect(page.getByRole('link', { name: /Project Alpha/ })).toHaveCount(1)
 })
 

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { authenticate, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
+import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY } from './fixtures'
 
 test('loads and saves the signed-in user theme without profile scoping', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
@@ -118,10 +118,15 @@ for (const brightness of ['light', 'dark'] as const) {
 
 test('tints transparent app surfaces with the active theme background color', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockChatSocket(page)
   await page.addInitScript(() => {
     window.localStorage.setItem('hermes_brightness', 'dark')
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+      'theme-conversation': { session_id: 'theme-conversation', messages: [], isWorking: false, events: [] },
+    }
   })
   const api = await mockHermesApi(page, {
+    sessions: [{ id: 'theme-conversation', profile: 'research', source: 'cli', title: 'Theme conversation', model: 'test-model', provider: 'test-provider', started_at: 100, last_active: 101, message_count: 0 }],
     theme: {
       background: {
         name: 'theme-background.png',
@@ -159,7 +164,7 @@ test('tints transparent app surfaces with the active theme background color', as
   )
   await page.keyboard.press('Escape')
 
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/session/theme-conversation?profile=research')
   await expect(page.locator('.chat-panel')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(page.locator('.chat-panel > .session-list')).toHaveCSS(
     'background-color',

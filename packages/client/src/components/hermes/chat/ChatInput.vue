@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { getApiKey, getBaseUrlValue, getStoredUserId } from '@/api/client'
+import { attachmentDraftFor } from '@/utils/composer-attachment-drafts'
 import { DEFAULT_REASONING_EFFORTS, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import type { NativeEffortChoice } from '@/utils/native-model-families'
 import { isBuiltinEkkoSession, isExternalCodingAgentSession } from '@/utils/hermes/session-agent'
@@ -42,7 +44,7 @@ const props = withDefaults(defineProps<{
   initialText?: string
   persistDraft?: boolean
   draft?: boolean
-  draftConfig?: Pick<Session, 'profile' | 'provider' | 'model' | 'codingAgentMode'>
+  draftConfig?: Pick<Session, 'profile' | 'provider' | 'model' | 'codingAgentMode' | 'agent'>
   reasoningEffort?: string
   reasoningEffortDisabled?: boolean
   nativeReasoningEfforts?: string[]
@@ -169,10 +171,10 @@ const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement>()
 const commandDropdownRef = ref<HTMLDivElement>()
 const fileInputRef = ref<HTMLInputElement>()
-const attachments = ref<Attachment[]>([])
+const attachmentScope = computed(() => `${getBaseUrlValue()}:${getStoredUserId() || getApiKey()}:${getActiveDraftSessionId() || 'legacy-new'}`)
+const attachmentDraft = ref(attachmentDraftFor(attachmentScope.value))
+const attachments = computed({ get: () => attachmentDraft.value.attachments, set: value => { attachmentDraft.value.attachments = value } })
 const previewAttachment = ref<Attachment | null>(null)
-const pendingVideoFrameJobs = new Set<Promise<void>>()
-const isPreparingAttachments = ref(false)
 let sendAwaitingAttachments = false
 const isDragging = ref(false)
 const dragCounter = ref(0)
@@ -278,7 +280,7 @@ let bundlesLoadedKey = ''
 let bundlesLoadRequest: Promise<void> | null = null
 let bundlesLoadRequestKey = ''
 const isBridgeSession = computed(() => {
-  if (props.draft) return false
+  if (props.draft) return props.draftConfig?.agent === 'hermes'
   const session = composerSession.value
   if (!session) return chatStore.runtimeMode !== 'global_agent'
   return session.source === 'cli' && !isBuiltinEkkoSession(session)
@@ -363,7 +365,7 @@ function skillCommandName(name: string) {
 }
 
 function currentSkillsKey() {
-  return composerSession.value?.profile || profilesStore.activeProfileName || 'default'
+  return (props.draft ? props.draftConfig?.profile : composerSession.value?.profile) || profilesStore.activeProfileName || 'default'
 }
 
 async function loadSkills() {
@@ -534,7 +536,7 @@ function readDraftMap(): DraftMap {
 }
 
 function getActiveDraftSessionId() {
-  if (props.draft) return ''
+  if (props.draft) return props.draftConfig?.profile ? `new-bot:${getStoredUserId() || 'authenticated'}:${props.draftConfig.profile}` : ''
   return chatStore.activeSessionId || composerSession.value?.id || ''
 }
 
@@ -543,8 +545,7 @@ function loadDraftForActiveSession() {
   inputText.value = sessionId ? readDraftMap()[sessionId] || '' : ''
 }
 
-function saveDraftForActiveSession(value: string) {
-  const sessionId = getActiveDraftSessionId()
+function saveDraftForActiveSession(value: string, sessionId = getActiveDraftSessionId()) {
   if (!sessionId) return
   const drafts = readDraftMap()
   if (value) {
@@ -587,7 +588,9 @@ watch(inputText, (value) => {
   if (props.persistDraft) saveDraftForActiveSession(value)
 })
 
-watch(() => composerSession.value?.id, () => {
+watch(() => getActiveDraftSessionId(), () => {
+  attachmentDraft.value = attachmentDraftFor(attachmentScope.value)
+  previewAttachment.value = null
   if (props.persistDraft) loadDraftForActiveSession()
   else inputText.value = props.initialText
   nextTick(() => {
@@ -605,8 +608,11 @@ watch(() => settingsStore.display.chat_input_height, () => {
 })
 
 watch(
-  () => [composerSession.value?.profile, profilesStore.activeProfileName],
+  currentSkillsKey,
   () => {
+    showSkillPicker.value = false
+    showBundlePicker.value = false
+    showBundleCreator.value = false
     skillsLoadedKey = ''
     skillCategories.value = []
     bundlesLoadedKey = ''
@@ -898,6 +904,7 @@ function formatTokens(n: number): string {
 // --- File attachment helpers ---
 
 function addFile(file: File) {
+  const targetDraft = attachmentDraft.value
   if (attachments.value.find(a => a.name === file.name)) return
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
   const url = URL.createObjectURL(file)
@@ -914,10 +921,10 @@ function addFile(file: File) {
   let job: Promise<void>
   job = extractRepresentativeVideoFrames(file)
     .then((frames) => {
-      if (!attachments.value.some(attachment => attachment.id === id)) return
+      if (!targetDraft.attachments.some(attachment => attachment.id === id)) return
       for (const frame of frames) {
-        attachments.value.push({
-          id: `${id}-frame-${attachments.value.length}`,
+        targetDraft.attachments.push({
+          id: `${id}-frame-${targetDraft.attachments.length}`,
           name: frame.name,
           type: frame.type,
           size: frame.size,
@@ -931,11 +938,9 @@ function addFile(file: File) {
       // Keep the original video attachment. Coding agents can still inspect its local path.
     })
     .finally(() => {
-      pendingVideoFrameJobs.delete(job)
-      isPreparingAttachments.value = pendingVideoFrameJobs.size > 0
+      targetDraft.jobs.delete(job)
     })
-  pendingVideoFrameJobs.add(job)
-  isPreparingAttachments.value = true
+  targetDraft.jobs.add(job)
 }
 
 function addFiles(files: File[]) {
@@ -1010,33 +1015,38 @@ defineExpose({ addFiles, focusComposer })
 
 async function handleSend() {
   if (props.sendDisabled || submitting.value) return
-  if (isPreparingAttachments.value) {
+  const targetSession = props.draft || !chatStore.activeSession ? null : { ...chatStore.activeSession }
+  const targetDraftKey = getActiveDraftSessionId()
+  const targetDraft = attachmentDraft.value
+  const text = inputText.value.trim()
+  if (targetDraft.jobs.size > 0) {
     if (sendAwaitingAttachments) return
     sendAwaitingAttachments = true
     try {
-      while (pendingVideoFrameJobs.size > 0) {
-        await Promise.allSettled([...pendingVideoFrameJobs])
+      while (targetDraft.jobs.size > 0) {
+        await Promise.allSettled([...targetDraft.jobs])
       }
     } finally {
       sendAwaitingAttachments = false
     }
   }
-  const text = inputText.value.trim()
-  if (!text && attachments.value.length === 0) return
-  if (isBridgeSession.value && text === '/skill' && attachments.value.length === 0) {
+  if (props.draft && getActiveDraftSessionId() !== targetDraftKey) return
+  if (!text && targetDraft.attachments.length === 0) return
+  const localCommand = isBridgeSession.value && getActiveDraftSessionId() === targetDraftKey && targetDraft.attachments.length === 0
+  if (localCommand && text === '/skill') {
     void openSkillPicker()
     return
   }
-  if (isBridgeSession.value && attachments.value.length === 0 && /^\/bundles$/i.test(text)) {
+  if (localCommand && /^\/bundles$/i.test(text)) {
     void openBundlePicker()
     return
   }
-  if (isBridgeSession.value && attachments.value.length === 0 && /^\/bundles\s+create$/i.test(text)) {
+  if (localCommand && /^\/bundles\s+create$/i.test(text)) {
     openBundleCreator()
     return
   }
 
-  const files = attachments.value.length > 0 ? [...attachments.value] : undefined
+  const files = targetDraft.attachments.length > 0 ? [...targetDraft.attachments] : undefined
   if (props.submit) {
     submitting.value = true
     try {
@@ -1045,8 +1055,12 @@ async function handleSend() {
       submitting.value = false
     }
   } else {
-    chatStore.sendMessage(text, files)
+    if (targetSession) chatStore.sendMessage(text, files, targetSession)
+    else chatStore.sendMessage(text, files)
   }
+  targetDraft.attachments = []
+  saveDraftForActiveSession('', targetDraftKey)
+  if (getActiveDraftSessionId() !== targetDraftKey) return
   inputText.value = ''
   saveDraftForActiveSession('')
   previewAttachment.value = null

@@ -72,7 +72,7 @@ vi.mock('socket.io-client', () => {
       __trigger: (event: string, ...args: any[]) => {
         if (event === 'connect') socket.connected = true
         if (event === 'disconnect') { socket.connected = false; rooms.clear() }
-        if (!['connect', 'disconnect', 'connect_error'].includes(event) &&
+        if (!['connect', 'disconnect', 'connect_error', 'session.activity.snapshot', 'session.activity', 'approval.requested', 'approval.resolved'].includes(event) &&
             (!socket.connected || !rooms.has(args[0]?.session_id))) return
         for (const handler of [...(listeners.get(event) || [])]) handler(...args)
       },
@@ -115,6 +115,7 @@ beforeEach(async () => {
   const { disconnectChatRun } = await import('@/api/studio/chat')
   disconnectChatRun()
   localStorage.clear()
+  sessionStorage.clear()
   setApiKey('test-token')
   localStorage.setItem('hermes_active_profile_name', 'default')
   socketState.sockets = []
@@ -132,6 +133,87 @@ afterEach(async () => {
 })
 
 describe('sidebar activity through the real chat API', () => {
+  it('clears disconnected provider choices only for their owning Bot', () => {
+    for (const session of store.sessions) Object.assign(session, { provider: 'copilot', model: 'gpt-test' })
+    store.clearProviderFromSessions('copilot', 'default')
+    expect(store.sessions[0].provider).toBe('')
+    expect(store.sessions[1]).toMatchObject({ provider: 'copilot', model: 'gpt-test' })
+  })
+
+  it('shows running and waiting Bots from activity snapshots before any session is opened', () => {
+    store.sessions = []
+    store.observeProfiles(['default', 'research'])
+    const research = socketState.sockets.find(socket => socket.profile === 'research')
+    research.__trigger('session.activity.snapshot', { sessions: [{ session_id: 'unopened', status: 'running' }] })
+    expect(store.getProfileActivity('research')).toEqual({ working: 1, pending: 0, unread: 0 })
+    expect(store.getSessionActivity('unopened')).toEqual({ working: true, pending: false, unread: false })
+    // The history list can arrive after activity discovery, before any resume.
+    store.sessions = [session('unopened', 'research'), session('idle', 'research')]
+    const activityRows = () => store.sessions.filter(item => store.isSessionWorking(item.id) || store.isSessionCompletedUnread(item.id)).map(item => item.id)
+    expect(activityRows()).toEqual(['unopened'])
+    research.__trigger('approval.requested', { session_id: 'unopened' })
+    expect(store.getProfileActivity('research').pending).toBe(1)
+    expect(store.getSessionActivity('unopened').pending).toBe(true)
+    research.__trigger('session.activity', { session_id: 'unopened', status: 'completed' })
+    expect(store.getProfileActivity('research')).toEqual({ working: 0, pending: 0, unread: 1 })
+    expect(activityRows()).toEqual(['unopened'])
+    expect(store.getSessionActivity('unopened')).toEqual({ working: false, pending: false, unread: true })
+    expect(store.getProfileActivity('default')).toEqual({ working: 0, pending: 0, unread: 0 })
+  })
+
+  it('keeps two foreground runs and their control sockets isolated while switching Bots', async () => {
+    await store.switchSession('one')
+    await store.sendMessage('A work')
+    const a = socketState.sockets.find(socket => socket.profile === 'default')
+    await store.switchSession('two')
+    await store.sendMessage('B work')
+    const b = socketState.sockets.find(socket => socket.profile === 'research')
+    expect(a.connected).toBe(true)
+    expect(b.connected).toBe(true)
+    a.__trigger('message.delta', { event: 'message.delta', session_id: 'one', delta: 'A answer' })
+    b.__trigger('message.delta', { event: 'message.delta', session_id: 'two', delta: 'B answer' })
+    expect(store.sessions.find(session => session.id === 'one')?.messages.some(message => message.content.includes('A answer'))).toBe(true)
+    expect(store.messages.some(message => message.content.includes('A answer'))).toBe(false)
+    expect(store.messages.some(message => message.content.includes('B answer'))).toBe(true)
+    expect(store.getProfileActivity('default').working).toBe(1)
+    store.stopStreaming()
+    expect(b.emit).toHaveBeenCalledWith('abort', { session_id: 'two' })
+    expect(a.emit).not.toHaveBeenCalledWith('abort', expect.anything())
+    a.__trigger('run.completed', { event: 'run.completed', session_id: 'one' })
+    expect(store.getProfileActivity('default')).toMatchObject({ working: 0, unread: 1 })
+  })
+
+  it('sends a prepared media message to its captured Bot after the visible Bot changes', async () => {
+    Object.assign(store.sessions[0], { model: 'original-model', provider: 'original-provider', workspace: '/original' })
+    await store.switchSession('one')
+    const target = { ...store.activeSession! }
+    await store.switchSession('two')
+    store.sessions[0].model = 'later-model'
+    await store.sendMessage('prepared media', [], target)
+    const run = socketState.sockets.flatMap(socket => socket.emit.mock.calls).find(call => call[0] === 'run')?.[1]
+    expect(run).toMatchObject({ session_id: 'one', profile: 'default', model: 'original-model', provider: 'original-provider', workspace: '/original' })
+    expect(store.activeSessionId).toBe('two')
+    expect(store.messages).toEqual([])
+  })
+
+  it('pins upload provenance and model/workspace to the sending Bot across an upload wait', async () => {
+    Object.assign(store.sessions[0], { model: 'a-model', provider: 'a-provider', workspace: '/a-work', reasoningEffort: 'high' })
+    Object.assign(store.sessions[1], { model: 'b-model', provider: 'b-provider', workspace: '/b-work' })
+    await store.switchSession('one')
+    let release!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { release = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const sending = store.sendMessage('A attachment', [{ id: 'file', name: 'notes.txt', type: 'text/plain', size: 4, url: '', file: new File(['note'], 'notes.txt', { type: 'text/plain' }) }])
+    await store.switchSession('two')
+    localStorage.setItem('hermes_active_profile_name', 'research')
+    release(new Response(JSON.stringify({ files: [{ name: 'notes.txt', path: '/uploads/notes.txt' }] }), { status: 200 }))
+    await sending
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ headers: { 'X-Hermes-Profile': 'default' } })
+    const run = socketState.sockets.flatMap(socket => socket.emit.mock.calls).find(call => call[0] === 'run')?.[1]
+    expect(run).toMatchObject({ session_id: 'one', profile: 'default', model: 'a-model', provider: 'a-provider', workspace: '/a-work', reasoning_effort: 'high' })
+    expect(store.sessions.find(session => session.id === 'two')?.messages).toEqual([])
+  })
+
   it.each(['clear', 'replace', 'server'])('does not submit a prepared send after %s invalidation', async (action) => {
     await store.switchSession('one')
     const { useAppStore } = await import('@/stores/hermes/app')
@@ -143,6 +225,8 @@ describe('sidebar activity through the real chat API', () => {
     else setServerUrl('https://replacement.example')
     setApiKey('new-login-token')
     const socketCount = socketState.sockets.length
+    expect(store.sessions).toEqual([])
+    expect(store.activeSessionId).toBeNull()
     release()
     await sending
     expect(socketState.sockets).toHaveLength(socketCount)
@@ -163,12 +247,14 @@ describe('sidebar activity through the real chat API', () => {
     clearApiKey()
     setApiKey('new-login-token')
     await store.sendMessage('fresh draft')
+    const freshSessionId = store.activeSessionId!
     const messageCount = store.sessions[0].messages.length
-    expect(store.isSessionLive('one')).toBe(true)
+    expect(freshSessionId).not.toBe('one')
+    expect(store.isSessionLive(freshSessionId)).toBe(true)
     rejectPreparation(new Error('old preparation failed'))
     await sending
     expect(store.sessions[0].messages).toHaveLength(messageCount)
-    expect(store.isSessionLive('one')).toBe(true)
+    expect(store.isSessionLive(freshSessionId)).toBe(true)
   })
 
   it('ignores attachment upload results arriving after credential invalidation', async () => {
@@ -182,11 +268,12 @@ describe('sidebar activity through the real chat API', () => {
     finishUpload(new Response(JSON.stringify({ files: [{ name: 'note.txt', path: '/uploads/old-note.txt' }] }), { status: 200 }))
     await sending
     expect(socketState.sockets).toHaveLength(socketCount)
-    expect(store.sessions[0].messages.at(-1)?.attachments?.[0].url).toBeUndefined()
+    expect(store.sessions).toEqual([])
     expect(store.isSessionWorking('one')).toBe(false)
   })
 
   it.each(['clear', '401', 'disabled403', 'replace', 'server'])('invalidates authenticated activity through %s and resumes only with fresh credentials', async (action) => {
+    const ownedSession = { ...store.sessions[0] }
     socketState.pending.set('one', 1)
     await store.switchSession('one')
     const execution = socketState.sockets[0]
@@ -226,6 +313,9 @@ describe('sidebar activity through the real chat API', () => {
     expect(socketState.sockets).toHaveLength(socketCount)
 
     setApiKey('new-login-token')
+    expect(store.sessions).toEqual([])
+    // The newly authenticated session list must rediscover the owned entity.
+    store.sessions.push(ownedSession)
     await store.switchSession('one')
     expect(store.isSessionWorking('one')).toBe(true)
     expect(socketState.sockets.filter(socket => socket.connected).every(socket => socket.token === 'new-login-token')).toBe(true)
@@ -339,7 +429,7 @@ describe('sidebar activity through the real chat API', () => {
       await Promise.resolve()
     }
     await store.switchSession('two')
-    expect(executionSocket.connected).toBe(false)
+    expect(executionSocket.connected).toBe(true)
     expect(store.isSessionWorking('one')).toBe(true)
     // Broadcast only reaches connected sockets which joined this session room.
     for (const socket of socketState.sockets) socket.__trigger('delegation.updated', {

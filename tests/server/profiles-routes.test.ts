@@ -30,7 +30,7 @@ const agentStatusMocks = vi.hoisted(() => ({
   hermesAvailable: true,
 }))
 
-const userProfilesMocks = vi.hoisted(() => ({ listUserProfiles: vi.fn() }))
+const userProfilesMocks = vi.hoisted(() => ({ listUserProfiles: vi.fn(), grantUserProfile: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/users', () => userProfilesMocks)
 
 // Mock hermes-cli
@@ -92,6 +92,7 @@ describe('Profile Routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     agentStatusMocks.hermesAvailable = true
+    userProfilesMocks.grantUserProfile.mockReturnValue(true)
     agentBridgeMocks.destroyProfile.mockResolvedValue({ destroyed: 0 })
     gatewayAutostartMocks.prepareGatewayForProfileDelete.mockResolvedValue(undefined)
     skillInjectorMocks.injectMissingSkills.mockResolvedValue({ targets: [] })
@@ -632,6 +633,12 @@ describe('Profile Routes', () => {
   })
 
   describe('profile avatars', () => {
+    beforeEach(async () => {
+      const hermesHome = await mkdtemp(join(tmpdir(), 'studio-avatar-profile-'))
+      tempHomes.push(hermesHome)
+      process.env.HERMES_HOME = hermesHome
+      await mkdir(join(hermesHome, 'profiles', 'work'), { recursive: true })
+    })
     it('returns a compressed image avatar from the App-only profile endpoint', async () => {
       const webUiHome = await mkdtemp(join(tmpdir(), 'hermes-web-ui-app-avatar-'))
       tempHomes.push(webUiHome)
@@ -756,13 +763,14 @@ describe('Profile Routes', () => {
       expect(readFileSync(join(dir, 'avatar.bin')).toString()).toBe('avatar-png')
     })
 
-    it('deletes profile avatar metadata', async () => {
+    it('resets the avatar without clearing Bot identity metadata', async () => {
       const webUiHome = await mkdtemp(join(tmpdir(), 'hermes-web-ui-avatar-'))
       tempHomes.push(webUiHome)
       process.env.HERMES_WEB_UI_HOME = webUiHome
       const metadataDir = join(webUiHome, 'profile-metadata', Buffer.from('work', 'utf-8').toString('base64url'))
       await mkdir(metadataDir, { recursive: true })
       await writeFile(join(metadataDir, 'avatar.json'), '{"type":"generated"}\n', 'utf-8')
+      await writeFile(join(metadataDir, 'identity.json'), '{"displayName":"研究助手","description":"帮助整理资料"}\n', 'utf-8')
       const { deleteAvatar } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
       const ctx: any = { params: { name: 'work' }, status: 200, body: undefined }
 
@@ -770,7 +778,206 @@ describe('Profile Routes', () => {
 
       expect(ctx.status).toBe(200)
       expect(ctx.body).toEqual({ success: true })
-      expect(existsSync(metadataDir)).toBe(false)
+      expect(existsSync(join(metadataDir, 'avatar.json'))).toBe(false)
+      expect(JSON.parse(await readFile(join(metadataDir, 'identity.json'), 'utf8'))).toEqual({ displayName: '研究助手', description: '帮助整理资料' })
+    })
+  })
+
+  describe('Bot identity and creation', () => {
+    beforeEach(async () => {
+      const hermesHome = await mkdtemp(join(tmpdir(), 'studio-bot-profile-'))
+      const webUiHome = await mkdtemp(join(tmpdir(), 'studio-bot-identity-'))
+      tempHomes.push(hermesHome, webUiHome)
+      process.env.HERMES_HOME = hermesHome
+      process.env.HERMES_WEB_UI_HOME = webUiHome
+      await mkdir(join(hermesHome, 'profiles', 'research'), { recursive: true })
+      await writeFile(join(hermesHome, 'profiles', 'research', 'config.yaml'), 'model:\n  provider: openai-api\n  default: gpt-test\n')
+    })
+
+    it('persists Chinese display identity independently of the immutable internal name', async () => {
+      const { updateIdentity, list, get } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = { params: { name: 'research' }, request: { body: { displayName: '  研究助手  ', description: '整理资料、分析问题' } }, status: 200 }
+      await updateIdentity(ctx)
+      expect(ctx.status).toBe(200)
+      expect(ctx.body.identity).toMatchObject({ displayName: '研究助手', description: '整理资料、分析问题' })
+      const listing: any = { status: 200 }
+      await list(listing)
+      expect(listing.body.profiles.find((profile: any) => profile.name === 'research')).toMatchObject({
+        name: 'research', displayName: '研究助手', description: '整理资料、分析问题', model: 'gpt-test',
+      })
+      expect(await readFile(join(process.env.HERMES_HOME!, 'profiles', 'research', 'config.yaml'), 'utf8')).not.toContain('研究助手')
+      const identity = JSON.parse(await readFile(join(process.env.HERMES_WEB_UI_HOME!, 'profile-metadata', Buffer.from('research').toString('base64url'), 'identity.json'), 'utf8'))
+      expect(identity.displayName).toBe('研究助手')
+      await updateIdentity({ ...ctx, request: { body: { description: '' } } })
+      const reloaded: any = { status: 200 }
+      await list(reloaded)
+      expect(reloaded.body.profiles.find((profile: any) => profile.name === 'research')).toMatchObject({ displayName: '研究助手', description: '' })
+      const detail: any = { params: { name: 'research' }, status: 200 }
+      await get(detail)
+      expect(detail.body.profile).toMatchObject({ name: 'research', displayName: '研究助手', model: 'gpt-test', provider: 'openai-api' })
+      expect(hermesCli.getProfile).not.toHaveBeenCalled()
+    })
+
+    it('rejects unknown or inaccessible Profiles before identity or avatar writes', async () => {
+      const { updateIdentity, updateAvatar, deleteAvatar } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      for (const handler of [updateIdentity, updateAvatar, deleteAvatar]) {
+        const unknown: any = { params: { name: 'missing' }, request: { body: { displayName: '不存在', type: 'generated' } }, status: 200 }
+        await handler(unknown)
+        expect(unknown.status).toBe(404)
+        const forbidden: any = { params: { name: 'research' }, state: { user: { id: 'restricted', role: 'user' } }, request: { body: {} }, status: 200 }
+        userProfilesMocks.listUserProfiles.mockReturnValue([{ profile_name: 'other' }])
+        await handler(forbidden)
+        expect(forbidden.status).toBe(403)
+      }
+      expect(existsSync(join(process.env.HERMES_WEB_UI_HOME!, 'profile-metadata'))).toBe(false)
+    })
+
+    it('rejects invalid identity data without changing an existing identity', async () => {
+      const { updateIdentity } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      for (const body of [{ displayName: 123 }, { description: 'x'.repeat(281) }, { displayName: '\u0000bad' }]) {
+        const ctx: any = { params: { name: 'research' }, request: { body }, status: 200 }
+        await updateIdentity(ctx)
+        expect(ctx.status).toBe(400)
+      }
+    })
+
+    it('creates an empty Bot with an automatic internal ID without invoking Hermes clone', async () => {
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = { request: { body: { displayName: '小研究员', description: '我的资料助手' } }, status: 200 }
+      await create(ctx)
+      expect(ctx.status).toBe(200)
+      expect(ctx.body.name).toMatch(/^bot-[a-f0-9-]+$/)
+      expect(ctx.body.profile).toMatchObject({ name: ctx.body.name, displayName: '小研究员', description: '我的资料助手' })
+      expect(hermesCli.createProfile).not.toHaveBeenCalled()
+      expect(await readFile(join(process.env.HERMES_HOME!, 'profiles', ctx.body.name, 'config.yaml'), 'utf8')).toBe('# Hermes Agent Configuration\n')
+      expect(existsSync(join(process.env.HERMES_HOME!, 'profiles', ctx.body.name, 'auth.json'))).toBe(false)
+      expect(agentBridgeMocks.destroyProfile).not.toHaveBeenCalled()
+      expect(hermesCli.useProfile).not.toHaveBeenCalled()
+    })
+
+    it('preserves private connection isolation through identity edits, avatar reset and legacy rename', async () => {
+      const { create, updateIdentity, updateAvatar, deleteAvatar, rename } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const { usesProfileOnlyCredentials } = await import('../../packages/server/src/modules/hermes/services/profiles/identity')
+      const ctx: any = { request: { body: { displayName: '独立助手' } }, status: 200 }
+      await create(ctx)
+      const name = ctx.body.name
+      expect(usesProfileOnlyCredentials(name)).toBe(true)
+      expect(ctx.body.profile.profileOnlyCredentials).toBeUndefined()
+      const edit: any = { params: { name }, request: { body: { displayName: '改名助手', profileOnlyCredentials: false } }, status: 200 }
+      await updateIdentity(edit)
+      expect(edit.body.identity.profileOnlyCredentials).toBeUndefined()
+      await updateAvatar({ ...edit, request: { body: { type: 'generated', seed: 'new-seed' } } })
+      await deleteAvatar({ params: { name }, status: 200 })
+      expect(usesProfileOnlyCredentials(name)).toBe(true)
+      vi.mocked(hermesCli.renameProfile).mockResolvedValue(true)
+      await rename({ params: { name }, request: { body: { new_name: 'renamed-bot' } }, status: 200 })
+      expect(usesProfileOnlyCredentials('renamed-bot')).toBe(true)
+      expect(usesProfileOnlyCredentials(name)).toBe(false)
+    })
+
+    it('checks source access before creating a Bot or transferring credentials', async () => {
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      userProfilesMocks.listUserProfiles.mockReturnValue([{ profile_name: 'other' }])
+      const ctx: any = { state: { user: { id: 'restricted', role: 'user' } }, request: { body: {
+        displayName: 'Blocked', sourceConnection: { profile: 'research', provider: 'openai-api', model: 'gpt-test' },
+      } }, status: 200 }
+      await create(ctx)
+      expect(ctx.status).toBe(403)
+      expect(hermesCli.createProfile).not.toHaveBeenCalled()
+    })
+
+    it('grants a new Bot to its creating admin without replacing existing grants', async () => {
+      const { create, get } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const owned = [{ profile_name: 'research' }]
+      userProfilesMocks.listUserProfiles.mockImplementation(() => owned)
+      userProfilesMocks.grantUserProfile.mockImplementation((id, name) => { owned.push({ profile_name: name }); return true })
+      const state = { user: { id: 17, role: 'admin' } }
+      const ctx: any = { state, request: { body: { displayName: '我的助手' } }, status: 200 }
+      await create(ctx)
+      expect(ctx.status).toBe(200)
+      expect(userProfilesMocks.grantUserProfile).toHaveBeenCalledWith(17, ctx.body.name)
+      const detail: any = { state, params: { name: ctx.body.name }, status: 200 }
+      await get(detail)
+      expect(detail.status).toBe(200)
+      expect(detail.body.profile.displayName).toBe('我的助手')
+      expect(owned.map(item => item.profile_name)).toEqual(['research', ctx.body.name])
+    })
+
+    it('rolls back a new Bot and identity if its ownership grant fails', async () => {
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      userProfilesMocks.grantUserProfile.mockReturnValue(false)
+      const ctx: any = { state: { user: { id: 17, role: 'admin' } }, request: { body: { name: 'failed-grant', displayName: '助手' } }, status: 200 }
+      await create(ctx)
+      expect(ctx.status).toBe(500)
+      expect(existsSync(join(process.env.HERMES_HOME!, 'profiles', 'failed-grant'))).toBe(false)
+      expect(existsSync(join(process.env.HERMES_WEB_UI_HOME!, 'profile-metadata', Buffer.from('failed-grant').toString('base64url')))).toBe(false)
+    })
+
+    it('finishes an in-flight identity write before renaming its metadata directory', async () => {
+      const { updateIdentity, rename } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const { safeFileStore } = await import('../../packages/server/src/modules/studio/public/safe-file-store')
+      const original = safeFileStore.updateText.bind(safeFileStore)
+      let release!: () => void
+      let entered!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      const started = new Promise<void>(resolve => { entered = resolve })
+      const spy = vi.spyOn(safeFileStore, 'updateText').mockImplementationOnce(async (...args) => {
+        entered()
+        await held
+        return original(...args)
+      })
+      const update: any = { params: { name: 'research' }, request: { body: { displayName: '更新名称' } }, status: 200 }
+      const writing = updateIdentity(update)
+      await started
+      vi.mocked(hermesCli.renameProfile).mockResolvedValue(true)
+      const renameCtx: any = { params: { name: 'research' }, request: { body: { new_name: 'renamed-bot' } }, status: 200 }
+      const renaming = rename(renameCtx)
+      await Promise.resolve()
+      await Promise.resolve()
+      const renameStartedEarly = vi.mocked(hermesCli.renameProfile).mock.calls.length > 0
+      release()
+      try { await Promise.all([writing, renaming]) } finally { spy.mockRestore() }
+      expect(renameStartedEarly).toBe(false)
+      expect(update.status).toBe(200)
+      expect(renameCtx.status).toBe(200)
+      const metadataRoot = join(process.env.HERMES_WEB_UI_HOME!, 'profile-metadata')
+      expect(existsSync(join(metadataRoot, Buffer.from('research').toString('base64url')))).toBe(false)
+      expect(JSON.parse(await readFile(join(metadataRoot, Buffer.from('renamed-bot').toString('base64url'), 'identity.json'), 'utf8')).displayName).toBe('更新名称')
+    })
+
+    it('rejects an identity edit queued behind deletion instead of recreating orphan metadata', async () => {
+      const { updateIdentity, remove } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      agentStatusMocks.hermesAvailable = false
+      let release!: () => void
+      let entered!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      const started = new Promise<void>(resolve => { entered = resolve })
+      gatewayAutostartMocks.prepareGatewayForProfileDelete.mockImplementationOnce(async () => { entered(); await held })
+      const deletion: any = { params: { name: 'research' }, status: 200 }
+      const deleting = remove(deletion)
+      await started
+      const update: any = { params: { name: 'research' }, request: { body: { displayName: '迟到的名称' } }, status: 200 }
+      const writing = updateIdentity(update)
+      release()
+      await Promise.all([deleting, writing])
+      expect(deletion.status).toBe(200)
+      expect(update.status).toBe(404)
+      expect(existsSync(join(process.env.HERMES_WEB_UI_HOME!, 'profile-metadata', Buffer.from('research').toString('base64url')))).toBe(false)
+    })
+
+    it('creates from the selected source connection without activating or cloning its Profile', async () => {
+      await writeFile(join(process.env.HERMES_HOME!, 'profiles', 'research', '.env'), 'OPENAI_API_KEY=selected-source-key\nTELEGRAM_BOT_TOKEN=unrelated\n')
+      const { create } = await import('../../packages/server/src/modules/hermes/controllers/profiles')
+      const ctx: any = { request: { body: { displayName: '代码助手', sourceConnection: { profile: 'research', provider: 'openai-api', model: 'gpt-test' } } }, status: 200 }
+      await create(ctx)
+      expect(ctx.status).toBe(200)
+      expect(ctx.body.profile).toMatchObject({ displayName: '代码助手', model: 'gpt-test' })
+      const env = await readFile(join(process.env.HERMES_HOME!, 'profiles', ctx.body.name, '.env'), 'utf8')
+      expect(env).toContain('selected-source-key')
+      expect(env).not.toContain('TELEGRAM')
+      expect(hermesCli.createProfile).not.toHaveBeenCalled()
+      expect(hermesCli.useProfile).not.toHaveBeenCalled()
+      expect(JSON.stringify(ctx.body)).not.toContain('selected-source-key')
     })
   })
 })

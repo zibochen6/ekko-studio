@@ -4,6 +4,7 @@ import { NPopconfirm, NCheckbox, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { Session } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
+import { botDisplayName } from '@/utils/bot-workspace'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import PinIcon from '@/components/common/PinIcon.vue'
@@ -40,6 +41,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const profilesStore = useProfilesStore()
 const profileName = computed(() => props.session.profile || 'default')
+const profileLabel = computed(() => botDisplayName(profilesStore.profiles.find(profile => profile.name === profileName.value) || { name: profileName.value }))
 const profileAvatar = computed(() => profilesStore.profiles.find(profile => profile.name === profileName.value)?.avatar)
 const profileHasModels = computed(() => {
   const profileModels = appStore.profileModelGroups.find(profile => profile.profile === profileName.value)
@@ -152,7 +154,7 @@ onUnmounted(() => {
         </span>
         <span v-if="props.showProfile" class="session-item-profile">
           <ProfileAvatar class="session-item-profile-avatar" :name="profileName" :avatar="profileAvatar" :size="16" />
-          <span class="session-item-profile-name">{{ profileName }}</span>
+          <span class="session-item-profile-name">{{ profileLabel }}</span>
         </span>
         <span
           v-if="props.categoryLabel"

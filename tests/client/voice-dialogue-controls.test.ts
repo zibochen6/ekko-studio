@@ -518,10 +518,11 @@ describe('VoiceDialogueControls', () => {
 
     expect(wrapper.find('[data-testid="voice-record-toggle"]').exists()).toBe(true)
 
+    const ownerSession = { ...chatStore.activeSession }
     await wrapper.get('textarea').setValue('typed hello')
     await getButtonByText(wrapper, 'chat.send').trigger('click')
 
-    expect(chatStore.sendMessage).toHaveBeenCalledWith('typed hello', undefined)
+    expect(chatStore.sendMessage).toHaveBeenCalledWith('typed hello', undefined, ownerSession)
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
   })
 

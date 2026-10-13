@@ -9,6 +9,7 @@ export interface ModelGroupResult {
 }
 
 export interface ProfileConfigDependencies {
+  usesProfileOnlyCredentials?: (profile: string) => boolean
   resolveModelBaseUrl?: (profile: string, provider: string, model: string) => string | undefined
   buildModelGroups: (config: Record<string, any>) => ModelGroupResult
   getProfilesBaseDir: () => string
@@ -104,4 +105,8 @@ export function updateConfigYamlForProfile<T = void>(
 
 export function resolveModelBaseUrl(profile: string, provider: string, model: string): string | undefined {
   return profileConfigDependencies?.resolveModelBaseUrl?.(profile, provider, model)
+}
+
+export function usesProfileOnlyCredentials(profile: string): boolean {
+  return profileConfigDependencies?.usesProfileOnlyCredentials?.(profile) === true
 }

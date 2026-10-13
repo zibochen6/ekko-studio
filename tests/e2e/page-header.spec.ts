@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 
 test('replaces the shared header on navigation and leaves page content below it', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   const host = page.locator('.studio-page-header')
   const rail = page.locator('.studio-navigation-rail')
   await expect(host.locator('.chat-header')).toBeVisible()
@@ -46,9 +46,16 @@ test('replaces the shared header on navigation and leaves page content below it'
     await expect(pageHeader).toHaveCount(1)
     await expect(pageHeader).toBeVisible()
     await expect.poll(async () => (await pageHeader.boundingBox())?.y).toBe(0)
-    await expect.poll(async () => (await pageHeader.boundingBox())?.height).toBe(40)
+    await expect.poll(async () => (await pageHeader.boundingBox())?.height).toBe(name === 'Chat' ? 64 : 40)
     const hasSessionList = !['Device connections', 'Agent Manager', 'Models'].includes(name)
     await expect(host.locator('.header-sidebar-control')).toHaveCount(hasSessionList ? 1 : 0)
+    if (name === 'Chat') {
+      const botSessions = page.locator('.chat-panel > .session-list')
+      await expect.poll(async () => (await sidebarControl.boundingBox())?.width).toBe(248)
+      expect((await sidebarControl.boundingBox())?.x).toBe((await botSessions.boundingBox())?.x)
+      expect((await sidebarControl.boundingBox())?.y).toBe(0)
+      await expect(page.locator('.bot-header-identity')).toContainText('research')
+    }
     if (!hasSessionList) {
       await expect(page.locator('.chat-panel > .session-list')).toHaveCount(0)
       await expect(page.locator('.chat-panel > .session-backdrop')).toHaveCount(0)
@@ -56,7 +63,7 @@ test('replaces the shared header on navigation and leaves page content below it'
       expect((await host.locator('.header-title').boundingBox())?.x).toBe(80)
     }
     await expect(page.locator('.app-main .page-header, .app-main .chat-header')).toHaveCount(0)
-    expect((await page.locator('.app-main').boundingBox())?.y).toBe(40)
+    expect((await page.locator('.app-main').boundingBox())?.y).toBe(name === 'Chat' ? 64 : 40)
   }
   await page.screenshot({ path: '/tmp/studio-outer-header.png', animations: 'disabled' })
 })

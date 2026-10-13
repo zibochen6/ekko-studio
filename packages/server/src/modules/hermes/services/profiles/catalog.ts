@@ -4,6 +4,7 @@ import { extname, join } from 'path'
 import YAML from 'js-yaml'
 import { logger } from '../../../studio/public/logging'
 import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from './profile'
+import { existingProfileDirectory } from './lifecycle'
 
 export interface HermesProfile {
   name: string
@@ -11,6 +12,24 @@ export interface HermesProfile {
   model: string
   gatewayStatus?: string
   alias: string
+}
+
+export async function readProfileDetailFromDisk(name: string) {
+  const path = await existingProfileDirectory(name)
+  const configPath = join(path, 'config.yaml')
+  const config = existsSync(configPath) ? YAML.load(readFileSync(configPath, 'utf8'), { json: true }) as Record<string, any> | null : null
+  const model = config?.model
+  let skills = 0
+  try { skills = readdirSync(join(path, 'skills'), { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).length } catch {}
+  return {
+    name,
+    path,
+    model: typeof model === 'string' ? model.trim() : String(model?.default || '').trim(),
+    provider: typeof model === 'object' ? String(model?.provider || '').trim() : '',
+    skills,
+    hasEnv: existsSync(join(path, '.env')),
+    hasSoulMd: existsSync(join(path, 'SOUL.md')),
+  }
 }
 
 export function readProfileDefaultModel(name: string): string {

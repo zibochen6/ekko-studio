@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import thinkingImage from '@/assets/thinking.gif'
 import type { ChatAgentAvatar } from '@/utils/chat-agent-avatar'
 
 const props = withDefaults(defineProps<{
@@ -13,7 +12,6 @@ const props = withDefaults(defineProps<{
 }>(), {
   agent: () => ({ label: 'Hermes', src: '/coding-agents/hermes.png' }),
 })
-const isEkko = computed(() => props.agent.label === 'Ekko')
 
 const { t } = useI18n()
 const reasoningBody = ref<HTMLElement | null>(null)
@@ -73,16 +71,15 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   <div class="live-reasoning-status">
     <div class="thinking-status">
       <img
-        :key="isEkko ? thinkingImage : agent.src"
-        :src="isEkko ? thinkingImage : agent.src"
+        :key="agent.src"
+        :src="agent.src"
         data-agent-deployment-image="pending"
         @load="($event.target as HTMLImageElement).dataset.agentDeploymentImage = 'ready'"
         @error="($event.target as HTMLImageElement).dataset.agentDeploymentImage = 'error'"
         alt=""
         aria-hidden="true"
-        class="thinking-avatar"
+        class="thinking-avatar thinking-avatar--logo"
         :data-agent-deployment-target="deploymentSessionId || ''"
-        :class="isEkko ? 'thinking-avatar--animated' : 'thinking-avatar--logo'"
       >
       <div class="thinking-status-copy">
         <span class="thinking-status-label">{{ t('chat.thinkingInProgress') }}</span>
@@ -136,22 +133,14 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
 .thinking-avatar {
   width: 40px;
   height: 40px;
-  border-radius: $radius-md;
-  object-fit: cover;
+  object-fit: contain;
   flex-shrink: 0;
-
-  &--animated {
-    .dark & {
-      filter: brightness(1.18) contrast(1.08) saturate(1.08);
-    }
-  }
+  animation: thinking-avatar-breathe 2.4s ease-in-out infinite;
 }
 
 .thinking-avatar--logo {
   box-sizing: border-box;
-  padding: 5px;
   object-fit: contain;
-  background: #fff;
 }
 
 .thinking-status-copy {
@@ -271,6 +260,16 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   100% {
     background-position: 0% 0;
   }
+}
+
+@keyframes thinking-avatar-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(0.94); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-avatar, .thinking-status-label { animation: none; }
+  .thinking-status-label { color: $text-secondary; background: none; }
 }
 
 </style>

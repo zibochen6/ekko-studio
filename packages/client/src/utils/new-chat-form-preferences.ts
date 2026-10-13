@@ -20,11 +20,11 @@ export interface NewChatFormPreferences {
 }
 
 const memory = new Map<string, NewChatFormPreferences>()
-const storageKey = (account: number | null) => `hermes_new_chat_form_v1:${account ?? 'authenticated'}`
+const storageKey = (account: number | null, profile?: string) => `hermes_new_chat_form_v1:${account ?? 'authenticated'}${profile ? ':' + encodeURIComponent(profile) : ''}`
 const stringValue = (value: unknown) => typeof value === 'string' ? value : ''
 
-export function loadNewChatFormPreferences(account: number | null): NewChatFormPreferences | null {
-  const key = storageKey(account)
+export function loadNewChatFormPreferences(account: number | null, profile?: string): NewChatFormPreferences | null {
+  const key = storageKey(account, profile)
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return memory.get(key) || null
@@ -64,8 +64,8 @@ export function loadNewChatFormPreferences(account: number | null): NewChatFormP
   }
 }
 
-export function saveNewChatFormPreferences(account: number | null, form: NewChatFormPreferences) {
-  const key = storageKey(account)
+export function saveNewChatFormPreferences(account: number | null, form: NewChatFormPreferences, profile?: string) {
+  const key = storageKey(account, profile)
   memory.set(key, { ...form })
   const { apiKey, ...preferences } = form
   try { localStorage.setItem(key, JSON.stringify(preferences)) } catch { /* Keep the in-memory preference. */ }

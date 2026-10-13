@@ -1,0 +1,7 @@
+{
+  "source": "User-supplied icon, 2026-10-13",
+  "sourceSha256": "a9175b8c753c82d1ed7ba08d47c571f7c27b66a20e4647fae98306904c1768e9",
+  "mode": "Built-in imagegen, background-extraction",
+  "prompt": "Remove only the exterior gray background and cast shadow. Preserve the entire black rounded tile, beveled rim, silver-white spherical character, two black eyes, orbital ring and light marks. Preserve composition, proportions, colors and materials. Transparent background, no extra tile, no text.",
+  "generation": "node packages/desktop/scripts/generate-rounded-icons.mjs"
+}

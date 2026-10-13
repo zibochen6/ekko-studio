@@ -10,13 +10,16 @@ const ACTIVE_PROFILE_STORAGE_KEY = 'hermes_active_profile_name'
 export const useProfilesStore = defineStore('profiles', () => {
   const profiles = ref<HermesProfile[]>([])
   // 初始化时同步读 localStorage，确保其他 store（如 chat）在启动时能拿到 profile name
-  const activeProfileName = ref<string | null>(localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY))
+  const initialProfileName = sessionStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY) || localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY)
+  if (initialProfileName) sessionStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, initialProfileName)
+  const activeProfileName = ref<string | null>(initialProfileName)
   const activeProfile = ref<HermesProfile | null>(null)
   const detailMap = ref<Record<string, HermesProfileDetail>>({})
   const loading = ref(false)
   const switching = ref(false)
   const hermesAvailable = ref(false)
   let profilesRequest: Promise<void> | null = null
+  let switchSequence = 0
 
   function fetchProfiles(): Promise<void> {
     // The page and its Profile selector mount together; share their initial load.
@@ -35,12 +38,13 @@ export const useProfilesStore = defineStore('profiles', () => {
     loading.value = true
     try {
       profiles.value = await profilesApi.fetchProfiles()
-      const storedName = activeProfileName.value || localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY)
+      const storedName = activeProfileName.value || (sessionStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY) || localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY))
       let selected = profiles.value.find(p => p.name === storedName) ?? null
       if (!selected && profiles.value.length > 0) {
         selected = profiles.value[0]
         activeProfileName.value = selected.name
         localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, selected.name)
+        sessionStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, selected.name)
       }
       profiles.value = profiles.value.map(profile => ({
         ...profile,
@@ -49,9 +53,11 @@ export const useProfilesStore = defineStore('profiles', () => {
       activeProfile.value = selected
       if (selected) {
         activeProfileName.value = selected.name
+        sessionStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, selected.name)
       } else {
         activeProfileName.value = null
         localStorage.removeItem(ACTIVE_PROFILE_STORAGE_KEY)
+        sessionStorage.removeItem(ACTIVE_PROFILE_STORAGE_KEY)
       }
       // 清理所有会话缓存（不再使用 localStorage 缓存）
       clearAllSessionCaches()
@@ -127,6 +133,20 @@ export const useProfilesStore = defineStore('profiles', () => {
     }
   }
 
+  async function updateIdentity(name: string, identity: { displayName?: string; description?: string }) {
+    const saved = await profilesApi.updateProfileIdentity(name, identity)
+    profiles.value = profiles.value.map(profile => profile.name === name ? { ...profile, ...saved } : profile)
+    if (detailMap.value[name]) detailMap.value[name] = { ...detailMap.value[name], ...saved }
+    if (activeProfile.value?.name === name) activeProfile.value = { ...activeProfile.value, ...saved }
+    return saved
+  }
+
+  async function createBot(options: { displayName: string; description?: string; sourceConnection?: { profile: string; provider: string; model: string } }) {
+    const result = await profilesApi.createProfile(options)
+    if (result.success) await refreshProfilesAfterMutation()
+    return result
+  }
+
   async function createProfile(name: string, clone?: boolean) {
     const res = await profilesApi.createProfile(name, clone)
     if (res.success) await refreshProfilesAfterMutation()
@@ -158,12 +178,14 @@ export const useProfilesStore = defineStore('profiles', () => {
   }
 
   async function switchProfile(name: string) {
+    const sequence = ++switchSequence
     switching.value = true
     try {
       const ok = await profilesApi.switchProfile(name)
-      if (ok) {
+      if (ok && sequence === switchSequence) {
         activeProfileName.value = name
         localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, name)
+        sessionStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, name)
         profiles.value = profiles.value.map(profile => ({
           ...profile,
           active: profile.name === name,
@@ -173,7 +195,7 @@ export const useProfilesStore = defineStore('profiles', () => {
       }
       return ok
     } finally {
-      switching.value = false
+      if (sequence === switchSequence) switching.value = false
     }
   }
 
@@ -210,6 +232,8 @@ export const useProfilesStore = defineStore('profiles', () => {
     fetchHermesProfiles,
     fetchProfileDetail,
     createProfile,
+    createBot,
+    updateIdentity,
     deleteProfile,
     renameProfile,
     switchProfile,

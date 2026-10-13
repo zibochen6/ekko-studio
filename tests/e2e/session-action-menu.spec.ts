@@ -97,7 +97,8 @@ test('consolidates current-session actions into one icon-bearing header menu', a
   await openDesktopChat(page)
 
   const headerActions = page.locator('.header-actions')
-  await expect(headerActions.getByRole('button')).toHaveCount(3)
+  await expect(headerActions.getByRole('button')).toHaveCount(4)
+  await expect(headerActions.getByRole('button', { name: 'Configuration', exact: true })).toBeVisible()
 
   const workspaceButton = headerActions.getByRole('button', { name: 'Set Workspace', exact: true })
   await expect(workspaceButton).toHaveAttribute('title', session.workspace)

@@ -5,7 +5,6 @@
   width: var(--studio-loading-size, 48px);
   height: var(--studio-loading-size, 48px);
   overflow: hidden;
-  border-radius: 25%;
   vertical-align: middle;
 }
 
@@ -13,8 +12,8 @@
   content: "";
   position: absolute;
   inset: 0;
-  /* Move the highlight inside a fixed mask without a blended compositor layer. */
-  background: linear-gradient(105deg, transparent 44%, rgba(255, 255, 255, 0.85) 50%, transparent 56%) 120% 0 / 300% 100% no-repeat;
+  /* A restrained highlight respects the tile's alpha and keeps its face visible. */
+  background: linear-gradient(105deg, transparent 44%, rgba(255, 255, 255, 0.24) 50%, transparent 56%) 120% 0 / 300% 100% no-repeat;
   pointer-events: none;
   -webkit-mask: url("/logo.png") center / contain no-repeat;
   mask: url("/logo.png") center / contain no-repeat;
@@ -26,7 +25,6 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-  border-radius: inherit;
 }
 
 @keyframes studio-logo-shimmer {
@@ -46,7 +44,6 @@
   }
 
   .studio-loading-logo img {
-    /* Keep loading feedback without sweeping or moving the logo. */
-    animation: studio-logo-breathe 2.4s ease-in-out infinite;
+    animation: none;
   }
 }

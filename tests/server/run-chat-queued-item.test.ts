@@ -108,6 +108,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/workspace-run-cha
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
+  usesProfileOnlyCredentials: () => false,
   readConfigYamlForProfile: vi.fn(async () => ({ mcp_servers: { 'ekko-studio-interaction': { command: 'studio' }, 'ekko-studio-use': { command: 'studio' } } })),
   getActiveProfileName: vi.fn(() => 'default'),
   getProfileDir: vi.fn(() => '/tmp/hermes-default'),

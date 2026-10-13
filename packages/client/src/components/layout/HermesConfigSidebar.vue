@@ -7,10 +7,15 @@ import { useI18n } from "vue-i18n";
 import PluginIcon from "@/components/common/PluginIcon.vue";
 import RouteLinkItem from "@/components/common/RouteLinkItem.vue";
 import { useAppStore } from "@/stores/hermes/app";
+import { useProfilesStore } from "@/stores/hermes/profiles";
+import { BOT_MANAGEMENT_ROUTES } from "@/utils/bot-management-route";
 
 const { t } = useI18n();
 const route = useRoute();
 const appStore = useAppStore();
+const profilesStore = useProfilesStore();
+const profileQuery = computed(() => ({ profile: profilesStore.activeProfileName || 'default' }));
+const returnToBot = computed(() => BOT_MANAGEMENT_ROUTES.has(String(route.name)));
 const { expanded, isMobile } = usePageSidebarState()
 watch(expanded, value => appStore.setPageSidebarExpanded(value), { immediate: true })
 
@@ -38,7 +43,7 @@ function handleNavClick(event: MouseEvent) {
     <nav class="hermes-config-nav" @click="handleNavClick">
       <RouteLinkItem
         class="hermes-config-nav-item"
-        :to="{ name: 'hermes.jobs' }"
+        :to="{ name: 'hermes.jobs', query: profileQuery }"
         :active="activeRoute === 'hermes.jobs'"
       >
         <svg
@@ -58,7 +63,7 @@ function handleNavClick(event: MouseEvent) {
       </RouteLinkItem>
       <RouteLinkItem
         class="hermes-config-nav-item"
-        :to="{ name: 'hermes.kanban' }"
+        :to="{ name: 'hermes.kanban', query: profileQuery }"
         :active="activeRoute === 'hermes.kanban'"
       >
         <svg
@@ -98,7 +103,7 @@ function handleNavClick(event: MouseEvent) {
       </RouteLinkItem>
       <RouteLinkItem
         class="hermes-config-nav-item"
-        :to="{ name: 'hermes.skills' }"
+        :to="{ name: 'hermes.skills', query: profileQuery }"
         :active="activeRoute === 'hermes.skills'"
       >
         <svg
@@ -219,7 +224,7 @@ function handleNavClick(event: MouseEvent) {
     <footer class="hermes-config-footer" @click="handleNavClick">
       <RouteLinkItem
         class="hermes-config-nav-item hermes-config-return"
-        :to="{ name: 'hermes.agentManager' }"
+        :to="returnToBot ? { name: 'hermes.chat', query: profileQuery } : { name: 'hermes.agentManager' }"
       >
         <svg
           width="17"

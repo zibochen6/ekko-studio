@@ -3,6 +3,8 @@ import { chmod, mkdir, open, readFile, rename, rm } from 'fs/promises'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { getHermesBaseDir, getProfileDir } from '../profiles/profile'
+import { existingProfileDirectory } from '../profiles/lifecycle'
+import { usesProfileOnlyCredentials } from '../profiles/identity'
 
 const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_REFRESH_SKEW_MS = 120_000
@@ -347,14 +349,20 @@ async function locateAuthSnapshot(
   provider: AuthorizedProvider,
   dependencies: ResolverDependencies,
 ): Promise<CredentialSnapshot | null> {
-  const profileDir = dependencies.profileDir || getProfileDir
-  const requestedPath = join(profileDir(profile), 'auth.json')
+  const profileOnly = usesProfileOnlyCredentials(profile)
+  const directory = dependencies.profileDir
+    ? dependencies.profileDir(profile)
+    : profileOnly ? await existingProfileDirectory(profile) : getProfileDir(profile)
+  const requestedPath = join(directory, 'auth.json')
   const requestedAuth = await readJsonFile(requestedPath)
   if (authContainsProvider(requestedAuth, provider)) {
     return snapshotFromAuth(requestedPath, requestedAuth, provider, dependencies.env || process.env)
   }
 
-  const defaultPath = join(profileDir('default'), 'auth.json')
+  if (profileOnly) return null
+  // Existing Profiles may deliberately use the shared Hermes authorization.
+  // Newly created Bots opt into independent credentials at creation time.
+  const defaultPath = join((dependencies.profileDir || getProfileDir)('default'), 'auth.json')
   if (resolve(defaultPath) === resolve(requestedPath)) return null
   const defaultAuth = await readJsonFile(defaultPath)
   if (!authContainsProvider(defaultAuth, provider)) return null
@@ -873,6 +881,7 @@ async function syncProviderSidecars(
   snapshot: CredentialSnapshot,
   refreshed: RefreshedTokens,
   dependencies: ResolverDependencies,
+  profileOnlyCredentials = false,
 ): Promise<void> {
   const now = (dependencies.now || Date.now)()
   if (snapshot.provider === 'claude-oauth') {
@@ -887,7 +896,10 @@ async function syncProviderSidecars(
   }
   if (snapshot.provider === 'nous') {
     const baseDir = (dependencies.hermesBaseDir || getHermesBaseDir)()
-    const sharedDir = firstText((dependencies.env || process.env).HERMES_SHARED_AUTH_DIR) || join(baseDir, 'shared')
+    const profileDirectory = dirname(snapshot.authPath)
+    const sharedDir = !profileOnlyCredentials
+      ? firstText((dependencies.env || process.env).HERMES_SHARED_AUTH_DIR) || join(baseDir, 'shared')
+      : join(profileDirectory, 'shared')
     const expiresAt = refreshed.expiresAtMs || now + Math.max(1, refreshed.expiresIn || 3600) * 1000
     await atomicWritePrivateJson(join(sharedDir, 'nous_auth.json'), {
       _schema: 1,
@@ -959,7 +971,7 @@ async function resolveHermesStoredProvider(
     const writeNow = (dependencies.now || Date.now)()
     applyRefreshedTokens(currentAuth, current, refreshed, writeNow)
     await atomicWritePrivateJson(current.authPath, currentAuth)
-    await syncProviderSidecars(current, refreshed, dependencies)
+    await syncProviderSidecars(current, refreshed, dependencies, usesProfileOnlyCredentials(profile))
     const saved = snapshotFromAuth(current.authPath, currentAuth, provider, dependencies.env || process.env)
     const savedSelected = selectedCredential(saved, writeNow)
     const token = savedSelected.token || refreshed.accessToken
@@ -1087,7 +1099,11 @@ export async function resolveAuthorizedProviderRuntimeCredentials(
       'AUTHORIZED_PROVIDER_UNSUPPORTED',
     )
   }
-  if (provider === 'qwen-oauth') return resolveQwenCredentials(dependencies, input.forceRefresh === true)
   const profile = clean(input.profile) || 'default'
+  if (provider === 'qwen-oauth') {
+    if (!usesProfileOnlyCredentials(profile)) return resolveQwenCredentials(dependencies, input.forceRefresh === true)
+    const directory = dependencies.profileDir ? dependencies.profileDir(profile) : await existingProfileDirectory(profile)
+    return resolveQwenCredentials({ ...dependencies, qwenAuthPath: () => join(directory, '.qwen', 'oauth_creds.json') }, input.forceRefresh === true)
+  }
   return resolveHermesStoredProvider(profile, provider, dependencies, input.forceRefresh === true)
 }

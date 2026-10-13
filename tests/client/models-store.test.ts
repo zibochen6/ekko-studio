@@ -14,7 +14,7 @@ const mockSystemApi = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/hermes/system', () => mockSystemApi)
-vi.mock('@/api/client', () => ({ hasApiKey: () => true, getModelsPageProfile: () => null }))
+vi.mock('@/api/client', () => ({ hasApiKey: () => true, getActiveProfileName: () => localStorage.getItem('hermes_active_profile_name') || 'default', getModelsPageProfile: () => null }))
 
 import { useAppStore } from '@/stores/hermes/app'
 import { useModelsStore } from '@/stores/hermes/models'

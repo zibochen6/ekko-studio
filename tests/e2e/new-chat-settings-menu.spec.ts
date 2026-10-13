@@ -30,7 +30,7 @@ for (const viewport of [
     id: index + 1, name: `Category ${String(index + 1).padStart(2, '0')}`,
   })) })
   await mockChatSocket(page)
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (viewport.width <= 768) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await page.getByRole('button', { name: 'Chat settings', exact: true }).click()

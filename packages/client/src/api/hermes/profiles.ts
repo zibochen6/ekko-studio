@@ -1,6 +1,12 @@
 import { request, getBaseUrlValue, getApiKey } from '../client'
 
-export interface HermesProfile {
+export interface ProfileIdentity {
+  displayName?: string
+  description?: string
+  updatedAt?: number
+}
+
+export interface HermesProfile extends ProfileIdentity {
   name: string
   active: boolean
   model: string
@@ -9,7 +15,7 @@ export interface HermesProfile {
   avatar?: ProfileAvatar | null
 }
 
-export interface HermesProfileDetail {
+export interface HermesProfileDetail extends ProfileIdentity {
   name: string
   path: string
   model: string
@@ -95,6 +101,14 @@ export async function deleteProfileAvatar(name: string): Promise<void> {
   await request(`/api/hermes/profiles/${encodeURIComponent(name)}/avatar`, { method: 'DELETE' })
 }
 
+export async function updateProfileIdentity(name: string, identity: Pick<ProfileIdentity, 'displayName' | 'description'>): Promise<ProfileIdentity> {
+  const res = await request<{ identity: ProfileIdentity }>(`/api/hermes/profiles/${encodeURIComponent(name)}/identity`, {
+    method: 'PATCH',
+    body: JSON.stringify(identity),
+  })
+  return res.identity
+}
+
 export async function restartProfileGateway(name: string): Promise<ProfileRuntimeStatus['gateway']> {
   const res = await request<{ success: boolean; gateway: ProfileRuntimeStatus['gateway'] }>(
     `/api/hermes/profiles/${encodeURIComponent(name)}/gateway/restart`,
@@ -113,6 +127,8 @@ export async function restartProfileRuntime(name: string): Promise<ProfileRuntim
 
 export interface CreateProfileResult {
   success: boolean
+  name?: string
+  profile?: HermesProfile
   /** clone=true 时被清理的独占平台凭据 KEY 名 */
   strippedCredentials?: string[]
   /** clone=true 时被禁用的独占平台名 */
@@ -121,20 +137,33 @@ export interface CreateProfileResult {
   strippedConfigCredentials?: string[]
 }
 
-export async function createProfile(name: string, clone?: boolean): Promise<CreateProfileResult & { error?: string }> {
+export interface CreateBotProfileOptions {
+  name?: string
+  displayName?: string
+  description?: string
+  sourceConnection?: { profile: string; provider: string; model: string }
+}
+
+export async function createProfile(options: CreateBotProfileOptions): Promise<CreateProfileResult & { error?: string }>
+export async function createProfile(name: string, clone?: boolean): Promise<CreateProfileResult & { error?: string }>
+export async function createProfile(nameOrOptions: string | CreateBotProfileOptions, clone?: boolean): Promise<CreateProfileResult & { error?: string }> {
   try {
     const res = await request<{
       success: boolean
+      name?: string
+      profile?: HermesProfile
       strippedCredentials?: string[]
       disabledPlatforms?: string[]
       strippedConfigCredentials?: string[]
       error?: string
     }>('/api/hermes/profiles', {
       method: 'POST',
-      body: JSON.stringify({ name, clone }),
+      body: JSON.stringify(typeof nameOrOptions === 'string' ? { name: nameOrOptions, clone } : nameOrOptions),
     })
     return {
       success: !!res.success,
+      name: res.name,
+      profile: res.profile,
       strippedCredentials: res.strippedCredentials,
       disabledPlatforms: res.disabledPlatforms,
       strippedConfigCredentials: res.strippedConfigCredentials,

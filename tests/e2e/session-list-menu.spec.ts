@@ -22,7 +22,7 @@ for (const width of [1440, 390]) {
         session_id: session.id, model: session.model, messages: [], title: session.title,
       }]))
     }, sessions)
-    await page.goto('/#/hermes/chat')
+    await page.goto('/#/hermes/chat?studio=1')
     if (width < 769) await page.getByRole('button', { name: 'Menu', exact: true }).click()
     const sidebar = page.locator(width < 769 ? '.studio-mobile-navigation .session-list' : '.chat-panel > .session-list')
     const more = sidebar.getByRole('button', { name: 'Session list actions', exact: true })

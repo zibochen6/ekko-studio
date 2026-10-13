@@ -1,6 +1,78 @@
 import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
+  botWorkspace: {
+    refreshBots: "로컬 Bot 다시 검색",
+    sharedKanban: "공유 보드",
+    sharedKanbanHint: "모든 Bot이 공유하는 보드입니다. 담당자로 필터링하여 특정 Bot의 작업을 확인하세요.",
+    workingDirectory: '작업 디렉터리',
+    "bots": "AI 도우미",
+    "personalWorkspace": "개인 작업 공간",
+    "expandBots": "Expand Bot sidebar",
+    "collapseBots": "Collapse Bot sidebar",
+    "createBot": "새 Bot",
+    "editBot": "Bot 편집",
+    "botActions": "Actions for {name}",
+    "displayName": "표시 이름",
+    "description": "소개",
+    "namePlaceholder": "Give your Bot a name",
+    "descriptionPlaceholder": "What would you like this assistant to help with?",
+    "descriptionHint": "A short introduction for display. Edit SOUL.md to change behavior.",
+    "internalId": "Internal Profile ID",
+    "internalIdHint": "This stable identifier connects configuration and history. Changing the display name keeps it unchanged.",
+    "uploadAvatar": "아바타 업로드",
+    "restoreAvatar": "기본값 복원",
+    "avatarHint": "PNG, JPG or WebP · up to 1 MB",
+    "connectionSource": "Use a model connection from",
+    "modelConnection": "Model connection",
+    "connectLater": "Connect a model later",
+    "connectionLoadFailed": "Could not load model connections",
+    "createHint": "A fresh Bot with independent settings, memory and history. Only the selected model connection is copied; personality, skills and tasks stay separate.",
+    "saved": "Bot 저장됨",
+    "saveFailed": "Could not save Bot",
+    "configuration": "설정",
+    "configIntro": "{name} has an independent Profile. These files control its behavior; your introduction is only a display label.",
+    "workspaceHint": "The working directory belongs to each conversation. Project instructions such as AGENTS.md and HERMES.md are read from that directory.",
+    "studioTools": "Studio 도구",
+    "otherAgents": "Ekko & coding agents",
+    "waiting": "확인 필요",
+    "working": "작업 중",
+    "completed": "새 결과",
+    "ready": "준비됨",
+    "personalAssistant": "Your personal AI assistant",
+    "conversations": "대화",
+    "searchConversations": "대화 검색",
+    "tasks": "활동",
+    "greeting": "What shall we work on, {name}?",
+    "startConversation": "A space for your ideas, questions and everyday work.",
+    "you": "나",
+    "files": {
+        "config": {
+            "title": "Model and runtime settings",
+            "description": "Model, tools and runtime preferences. Opens the existing configuration editor."
+        },
+        "credentials": {
+            "title": "Model credentials",
+            "description": "API keys and OAuth credentials. Manage these through model settings to keep secrets protected."
+        },
+        "soul": {
+            "title": "Personality and instructions",
+            "description": "The instructions that shape this Bot’s behavior. Your display introduction does not change this file."
+        },
+        "memory": {
+            "title": "Long-term memory",
+            "description": "This Bot’s accumulated knowledge and preferences, isolated from other Profiles."
+        },
+        "skills": {
+            "title": "Skills",
+            "description": "Reusable capabilities available to this Bot. Opens the existing skills manager."
+        },
+        "cron": {
+            "title": "Scheduled tasks",
+            "description": "Scheduled work for this Profile. Opens the existing task manager."
+        }
+    }
+},
   jev: {
     browserAutomation: "내장 브라우저 자동화",
     browserAutomationHint: "이 프로필에 저장된 JEV 연결을 사용하며 다음 판단부터 적용됩니다. 화면의 레이블을 JEV에 보내지만 입력값은 제외합니다. 비활성화, 서비스 오류 또는 불확실한 판단 시 기존 흐름을 유지합니다.",

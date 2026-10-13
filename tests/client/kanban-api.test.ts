@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mockRequest = vi.hoisted(() => vi.fn())
 const mockGetApiKey = vi.hoisted(() => vi.fn(() => ''))
 const mockGetBaseUrlValue = vi.hoisted(() => vi.fn(() => ''))
+const mockGetActiveProfileName = vi.hoisted(() => vi.fn<() => string | null>(() => null))
 
 vi.mock('../../packages/client/src/api/client', () => ({
   request: mockRequest,
   getApiKey: mockGetApiKey,
   getBaseUrlValue: mockGetBaseUrlValue,
+  getActiveProfileName: mockGetActiveProfileName,
 }))
 
 import {
@@ -46,15 +48,23 @@ describe('Kanban API', () => {
     localStorage.clear()
     mockGetApiKey.mockReturnValue('')
     mockGetBaseUrlValue.mockReturnValue('')
+    mockGetActiveProfileName.mockReturnValue(null)
   })
 
   it('builds board-scoped kanban event websocket URLs with auth token', () => {
     mockGetBaseUrlValue.mockReturnValue('https://wui.example.test')
     mockGetApiKey.mockReturnValue('token value')
-    localStorage.setItem('hermes_active_profile_name', 'research')
+    mockGetActiveProfileName.mockReturnValue('research')
 
     expect(buildKanbanEventsWebSocketUrl({ board: 'project-a' })).toBe('wss://wui.example.test/api/hermes/kanban/events?board=project-a&token=token+value&profile=research')
     expect(buildKanbanEventsWebSocketUrl()).toBe('wss://wui.example.test/api/hermes/kanban/events?board=default&token=token+value&profile=research')
+  })
+
+  it('uses the tab Profile for events even when another window changed local storage', () => {
+    localStorage.setItem('hermes_active_profile_name', 'other-window')
+    mockGetActiveProfileName.mockReturnValue('research')
+    expect(new URL(buildKanbanEventsWebSocketUrl()).searchParams.get('profile')).toBe('research')
+    expect(mockGetActiveProfileName).toHaveBeenCalledOnce()
   })
 
   it('serializes board, list filters, and archived inclusion into query params', async () => {

@@ -10369,8 +10369,18 @@
                   "clone": {
                     "type": "boolean"
                   },
+                  "description": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string"
+                  },
+                  "sourceConnection": {
+                    "type": "object",
+                    "additionalProperties": true
                   }
                 }
               }
@@ -10585,28 +10595,7 @@
               "type": "string"
             }
           }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "dataUrl": {
-                    "type": "string"
-                  },
-                  "seed": {
-                    "type": "string"
-                  },
-                  "type": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
+        ]
       },
       "delete": {
         "tags": [
@@ -10712,6 +10701,42 @@
         ]
       }
     },
+    "/api/hermes/profiles/{name}/identity": {
+      "patch": {
+        "tags": [
+          "Profiles"
+        ],
+        "summary": "Update identity",
+        "description": "PATCH /api/hermes/profiles/:name/identity",
+        "operationId": "updateIdentity",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/hermes/profiles/{name}/rename": {
       "post": {
         "tags": [
@@ -10756,10 +10781,7 @@
                   "new_name": {
                     "type": "string"
                   }
-                },
-                "required": [
-                  "new_name"
-                ]
+                }
               }
             }
           }

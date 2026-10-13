@@ -20,7 +20,7 @@ for (const mobile of [false, true]) {
         { id: 'qwen', installed: true, source: 'user-cli' },
       ],
     } }))
-    await page.goto('/#/hermes/chat')
+    await page.goto('/#/hermes/chat?studio=1')
     if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
     const draft = page.locator('.new-chat-page')
@@ -75,7 +75,7 @@ test('a saved unavailable Agent falls back to the first installed option and is 
       { id: 'codex', installed: codexInstalled, source: codexInstalled ? 'user-cli' : 'not-installed' },
     ],
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const draft = page.locator('.new-chat-page')
   const agent = draft.locator('.agent-card.active')
@@ -96,7 +96,7 @@ test('an unknown cached Agent falls back to the first option', async ({ page }) 
   await page.addInitScript(() => localStorage.setItem('hermes_new_chat_agent_v1', 'removed-agent'))
   await mockHermesApi(page)
   await mockChatSocket(page)
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const draft = page.locator('.new-chat-page')
   await expect(draft.locator('.agent-card.active')).toContainText('Ekko')

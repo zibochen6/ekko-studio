@@ -17,7 +17,7 @@ for (const mobile of [false, true]) test(`selects a DSH mode for a new chat (${m
       { id: 'broken', name: 'Broken mode', unavailable: true, isDefault: false },
     ] } })
   })
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const draft = page.locator('.new-chat-page')

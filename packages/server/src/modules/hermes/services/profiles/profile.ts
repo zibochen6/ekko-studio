@@ -1,6 +1,7 @@
 import { join } from 'path'
 import { readFileSync, existsSync, readdirSync } from 'fs'
 import { detectHermesRootHome } from '../runtime/path'
+import { getRequestProfileDirectory } from './request-scope'
 
 export function getHermesBaseDir(): string {
   return detectHermesRootHome()
@@ -64,6 +65,8 @@ export function getActiveProfileName(): string {
  * other   → ~/.hermes/profiles/{name}/
  */
 export function getProfileDir(name: string): string {
+  const scopedDirectory = getRequestProfileDirectory(name)
+  if (scopedDirectory) return scopedDirectory
   const hermesBase = getHermesBaseDir()
   if (!name || name === 'default') return hermesBase
   const dir = join(hermesBase, 'profiles', name)

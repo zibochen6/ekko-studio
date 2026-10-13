@@ -60,7 +60,7 @@ test('does not show a desktop update preview on the web', async ({ page }) => {
   await authenticate(page)
   await mockHermesApi(page)
   await page.goto('/#/hermes/chat')
-  await expect(page.locator('.page-sidebar-nav')).toBeVisible()
+  await expect(page.locator('.bot-sidebar')).toBeVisible()
   await expect(page.locator('.desktop-update-tab')).toHaveCount(0)
 })
 
@@ -69,7 +69,7 @@ test('shows update progress above new chat, with cancellation, retry and install
   await authenticate(page)
   await mockHermesApi(page)
   await page.goto('/#/hermes/chat')
-  await expect(page.locator('.page-sidebar-nav')).toBeVisible()
+  await expect(page.locator('.bot-session-heading')).toBeVisible()
   const tab = page.locator('.desktop-update-tab')
   await expect(tab).toHaveCount(0)
 
@@ -81,9 +81,9 @@ test('shows update progress above new chat, with cancellation, retry and install
   await expect(tab).toContainText('3.2 MB/s')
   await expect(tab).toContainText('v0.7.25')
   const tabBox = await tab.boundingBox()
-  const navBox = await page.locator('.page-sidebar-tabs').boundingBox()
+  const navBox = await page.locator('.bot-new-chat').boundingBox()
   expect(tabBox!.y + tabBox!.height).toBeLessThanOrEqual(navBox!.y)
-  await page.locator('.page-sidebar-nav').screenshot({ path: testInfo.outputPath('update-progress.png') })
+  await page.locator('.bot-session-heading').screenshot({ path: testInfo.outputPath('update-progress.png') })
 
   await tab.getByRole('button', { name: 'Stop download', exact: true }).click()
   await expect(tab).toContainText('Stopping download')

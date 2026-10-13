@@ -1,6 +1,78 @@
 import { socialMessagesFr } from '../social-messages-locales'
 
 export default {
+  botWorkspace: {
+    refreshBots: "Détecter les Bots locaux",
+    sharedKanban: "Tableau partagé",
+    sharedKanbanHint: "Un tableau partagé entre tous les Bots. Filtrez par responsable pour afficher les tâches d’un Bot.",
+    workingDirectory: 'Dossier de travail',
+    "bots": "Assistants",
+    "personalWorkspace": "ESPACE PERSONNEL",
+    "expandBots": "Expand Bot sidebar",
+    "collapseBots": "Collapse Bot sidebar",
+    "createBot": "Nouveau Bot",
+    "editBot": "Modifier le Bot",
+    "botActions": "Actions for {name}",
+    "displayName": "Nom affiché",
+    "description": "Présentation",
+    "namePlaceholder": "Give your Bot a name",
+    "descriptionPlaceholder": "What would you like this assistant to help with?",
+    "descriptionHint": "A short introduction for display. Edit SOUL.md to change behavior.",
+    "internalId": "Internal Profile ID",
+    "internalIdHint": "This stable identifier connects configuration and history. Changing the display name keeps it unchanged.",
+    "uploadAvatar": "Importer un avatar",
+    "restoreAvatar": "Rétablir par défaut",
+    "avatarHint": "PNG, JPG or WebP · up to 1 MB",
+    "connectionSource": "Use a model connection from",
+    "modelConnection": "Model connection",
+    "connectLater": "Connect a model later",
+    "connectionLoadFailed": "Could not load model connections",
+    "createHint": "A fresh Bot with independent settings, memory and history. Only the selected model connection is copied; personality, skills and tasks stay separate.",
+    "saved": "Bot enregistré",
+    "saveFailed": "Could not save Bot",
+    "configuration": "Configuration",
+    "configIntro": "{name} has an independent Profile. These files control its behavior; your introduction is only a display label.",
+    "workspaceHint": "The working directory belongs to each conversation. Project instructions such as AGENTS.md and HERMES.md are read from that directory.",
+    "studioTools": "Outils Studio",
+    "otherAgents": "Ekko & coding agents",
+    "waiting": "Confirmation requise",
+    "working": "En cours",
+    "completed": "Nouveau résultat",
+    "ready": "À votre service",
+    "personalAssistant": "Your personal AI assistant",
+    "conversations": "Conversations",
+    "searchConversations": "Rechercher une conversation",
+    "tasks": "Activité",
+    "greeting": "What shall we work on, {name}?",
+    "startConversation": "A space for your ideas, questions and everyday work.",
+    "you": "Vous",
+    "files": {
+        "config": {
+            "title": "Model and runtime settings",
+            "description": "Model, tools and runtime preferences. Opens the existing configuration editor."
+        },
+        "credentials": {
+            "title": "Model credentials",
+            "description": "API keys and OAuth credentials. Manage these through model settings to keep secrets protected."
+        },
+        "soul": {
+            "title": "Personality and instructions",
+            "description": "The instructions that shape this Bot’s behavior. Your display introduction does not change this file."
+        },
+        "memory": {
+            "title": "Long-term memory",
+            "description": "This Bot’s accumulated knowledge and preferences, isolated from other Profiles."
+        },
+        "skills": {
+            "title": "Skills",
+            "description": "Reusable capabilities available to this Bot. Opens the existing skills manager."
+        },
+        "cron": {
+            "title": "Scheduled tasks",
+            "description": "Scheduled work for this Profile. Opens the existing task manager."
+        }
+    }
+},
   jev: {
     browserAutomation: "Automatisation du navigateur intégré",
     browserAutomationHint: "Les évaluations facultatives utilisent la connexion JEV enregistrée pour ce profil dès la prochaine évaluation. Les libellés visibles sont envoyés à JEV, sans les valeurs saisies. Le fonctionnement habituel est conservé si le service est désactivé, indisponible ou incertain.",

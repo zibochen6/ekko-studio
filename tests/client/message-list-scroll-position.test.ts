@@ -72,6 +72,7 @@ vi.mock('@/components/hermes/chat/MessageItem.vue', () => ({
 
 import MessageList from '@/components/hermes/chat/MessageList.vue'
 import { useChatStore, type Message, type Session } from '@/stores/hermes/chat'
+import { useAccountStore } from '@/stores/account'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 function makeMessage(id: string): Message {
@@ -359,10 +360,14 @@ describe('MessageList session scroll position', () => {
     expect(wrapper.getComponent({ name: 'MessageItem' }).props('assistantAgent')).toEqual({ label, src })
   })
 
-  it('passes the active session profile identity to user message bubbles', async () => {
+  it('uses account identity for user messages while the assistant keeps its Profile identity', async () => {
     const chatStore = useChatStore()
     const profilesStore = useProfilesStore()
     const avatar = { type: 'generated' as const, seed: 'research-avatar' }
+    const accountStore = useAccountStore()
+    accountStore.username = 'Alice'
+    accountStore.avatar = { type: 'image', dataUrl: 'data:image/png;base64,account-avatar' }
+    vi.spyOn(accountStore, 'loadAccount').mockResolvedValue()
     profilesStore.activeProfileName = 'default'
     profilesStore.profiles = [
       { name: 'default', active: true, model: '', alias: '' },
@@ -380,8 +385,8 @@ describe('MessageList session scroll position', () => {
     await flushSessionScroll()
 
     const messageItem = wrapper.getComponent({ name: 'MessageItem' })
-    expect(messageItem.props('userProfileName')).toBe('Researcher')
-    expect(messageItem.props('userProfileAvatar')).toEqual(avatar)
+    expect(messageItem.props('userProfileName')).toBe('Alice')
+    expect(messageItem.props('userProfileAvatar')).toEqual({ type: 'image', dataUrl: 'data:image/png;base64,account-avatar' })
   })
 
   it('shows a history link instead of loading more after the live chat message cap', async () => {

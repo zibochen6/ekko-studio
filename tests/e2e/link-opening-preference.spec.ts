@@ -28,8 +28,11 @@ test('persists the desktop link-opening destination', async ({ page }) => {
   await expect(select).toHaveAttribute('aria-label', 'Open web links in')
   await expect(select).toContainText('Ekko Studio')
 
-  await select.locator('.n-base-selection-label').focus()
-  await page.keyboard.press('Enter')
+  await expect(page.locator('.settings-view')).toHaveAttribute('aria-busy', 'false', { timeout: 15_000 })
+  const label = select.locator('.n-base-selection-label')
+  await label.focus()
+  await expect(label).toBeFocused()
+  await label.press('Enter')
   await expect(page.getByText('Default browser', { exact: true }).last()).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')

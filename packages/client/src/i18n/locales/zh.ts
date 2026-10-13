@@ -1,6 +1,78 @@
 import { socialMessagesZh } from '../social-messages'
 
 export default {
+  botWorkspace: {
+    refreshBots: "重新检测本地 Bot",
+    sharedKanban: "共享看板",
+    sharedKanbanHint: "所有 Bot 共用的任务看板，可按负责人筛选某个 Bot 的任务。",
+    workingDirectory: '工作目录',
+    "bots": "AI 助手",
+    "personalWorkspace": "个人工作空间",
+    "expandBots": "展开 Bot 栏",
+    "collapseBots": "折叠 Bot 栏",
+    "createBot": "新建 Bot",
+    "editBot": "编辑 Bot",
+    "botActions": "{name} 的操作",
+    "displayName": "显示名称",
+    "description": "简介",
+    "namePlaceholder": "为你的 Bot 取个名字",
+    "descriptionPlaceholder": "这位助手擅长什么？",
+    "descriptionHint": "简介仅用于展示。修改 SOUL.md 可以调整行为与人格。",
+    "internalId": "内部 Profile 标识",
+    "internalIdHint": "用于关联配置与历史记录。修改显示名称不会改变这个标识。",
+    "uploadAvatar": "上传头像",
+    "restoreAvatar": "恢复默认头像",
+    "avatarHint": "PNG、JPG 或 WebP · 最大 1 MB",
+    "connectionSource": "沿用模型连接的来源",
+    "modelConnection": "模型连接",
+    "connectLater": "稍后连接模型",
+    "connectionLoadFailed": "无法加载模型连接",
+    "createHint": "创建一个配置、记忆和历史独立的全新 Bot。仅复制选中的模型连接，不复制人格、技能和任务。",
+    "saved": "Bot 已保存",
+    "saveFailed": "保存 Bot 失败",
+    "configuration": "配置说明",
+    "configIntro": "{name} 拥有独立的 Profile。以下文件决定它的实际行为，简介只用于展示。",
+    "workspaceHint": "工作目录由每个会话单独指定。AGENTS.md、HERMES.md 等项目指令从该目录读取。",
+    "studioTools": "Studio 工具",
+    "otherAgents": "Ekko 与编程助手",
+    "waiting": "等待你确认",
+    "working": "正在工作",
+    "completed": "有新结果",
+    "ready": "随时待命",
+    "personalAssistant": "你的个人 AI 助手",
+    "conversations": "会话",
+    "searchConversations": "搜索当前 Bot 的会话",
+    "tasks": "任务动态",
+    "greeting": "和 {name} 一起，开始新的工作",
+    "startConversation": "整理思路，探索问题，把想法慢慢变成现实。",
+    "you": "你",
+    "files": {
+        "config": {
+            "title": "模型与运行配置",
+            "description": "模型、工具及运行偏好。打开已有的配置编辑器。"
+        },
+        "credentials": {
+            "title": "模型凭据",
+            "description": "API 密钥与 OAuth 登录信息。通过模型设置管理，避免直接暴露密钥。"
+        },
+        "soul": {
+            "title": "人格与行为指令",
+            "description": "决定这位 Bot 如何回应。修改显示简介不会改动这份文件。"
+        },
+        "memory": {
+            "title": "长期记忆",
+            "description": "这位 Bot 积累的知识与你的偏好，与其他 Profile 分开保存。"
+        },
+        "skills": {
+            "title": "技能",
+            "description": "这位 Bot 可用的可复用能力。打开已有的技能管理。"
+        },
+        "cron": {
+            "title": "定时任务",
+            "description": "属于这个 Profile 的计划任务。打开已有的任务管理。"
+        }
+    }
+},
   jev: {
     browserAutomation: "内置浏览器自动化",
     browserAutomationHint: "可选判断复用当前 Profile 保存的 JEV 连接，下次判断生效。页面可见标签会发送给 JEV，不包含输入框的值。关闭、服务不可用或判断不确定时保留原有流程。",

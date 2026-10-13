@@ -41,6 +41,9 @@ const showWriteApprovalDrawer = ref(false)
 const pendingWriteCount = ref(0)
 const writeApprovalSupported = ref(true)
 let mobileQuery: MediaQueryList | null = null
+let skillsSequence = 0
+let pendingSequence = 0
+let disposed = false
 
 const selectedSkillData = computed(() => {
   if (!selectedCategory.value || !selectedSkill.value) return null
@@ -73,36 +76,54 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
+  skillsSequence++
+  pendingSequence++
   mobileQuery?.removeEventListener('change', handleMobileChange)
 })
 
-watch(() => props.target, () => {
+watch([skillTarget, () => profilesStore.activeProfileName], () => {
+  categories.value = []
+  archived.value = []
   selectedCategory.value = ''
   selectedSkill.value = ''
-  loadSkills()
+  showImportModal.value = false
+  showExternalDirsModal.value = false
+  showWriteApprovalDrawer.value = false
+  pendingWriteCount.value = 0
+  void loadSkills()
+  void loadPendingWriteCount()
 })
 
 async function loadSkills() {
+  const sequence = ++skillsSequence
   loading.value = true
   try {
     if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
       await profilesStore.fetchProfiles()
     }
-    const data = await fetchSkills(undefined, skillTarget.value)
+    if (disposed || sequence !== skillsSequence) return
+    const profile = profilesStore.activeProfileName || 'default'
+    const target = skillTarget.value
+    const data = await fetchSkills(target === 'hermes' ? profile : undefined, target)
+    if (disposed || sequence !== skillsSequence || profile !== (profilesStore.activeProfileName || 'default') || target !== skillTarget.value) return
     categories.value = data.categories
     archived.value = data.archived
     ensureSelectedSkill()
   } catch (err: any) {
     console.error('Failed to load skills:', err)
   } finally {
-    loading.value = false
+    if (sequence === skillsSequence) loading.value = false
   }
 }
 
 async function loadPendingWriteCount() {
+  const sequence = ++pendingSequence
   if (!isHermesTarget.value) return
+  const profile = profilesStore.activeProfileName || 'default'
   try {
     const data = await fetchPendingWrites()
+    if (disposed || sequence !== pendingSequence || profile !== (profilesStore.activeProfileName || 'default')) return
     writeApprovalSupported.value = data.supported !== false
     pendingWriteCount.value = writeApprovalSupported.value ? data.records?.length || 0 : 0
   } catch (err) {

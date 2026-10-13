@@ -1,4 +1,4 @@
-import { request, getApiKey, getBaseUrlValue } from '../client'
+import { request, getApiKey, getBaseUrlValue, getActiveProfileName } from '../client'
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -243,14 +243,6 @@ function normalizedBoard(board?: string): string {
   return trimmed || 'default'
 }
 
-function activeProfileName(): string | null {
-  try {
-    return localStorage.getItem('hermes_active_profile_name')
-  } catch {
-    return null
-  }
-}
-
 function appendQuery(path: string, params: URLSearchParams): string {
   const qs = params.toString()
   return qs ? `${path}?${qs}` : path
@@ -277,7 +269,7 @@ export function buildKanbanEventsWebSocketUrl(opts?: KanbanBoardOptions): string
   const params = boardParams(opts?.board)
   const token = getApiKey()
   if (token) params.set('token', token)
-  const profile = activeProfileName()
+  const profile = getActiveProfileName()
   if (profile) params.set('profile', profile)
   const path = `/api/hermes/kanban/events?${params.toString()}`
 
