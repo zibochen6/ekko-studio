@@ -1,6 +1,75 @@
 import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
+  botWorkspace: {
+    workingDirectory: '作業ディレクトリ',
+    "bots": "AI アシスタント",
+    "personalWorkspace": "個人ワークスペース",
+    "expandBots": "Expand Bot sidebar",
+    "collapseBots": "Collapse Bot sidebar",
+    "createBot": "Bot を作成",
+    "editBot": "Bot を編集",
+    "botActions": "Actions for {name}",
+    "displayName": "表示名",
+    "description": "紹介",
+    "namePlaceholder": "Give your Bot a name",
+    "descriptionPlaceholder": "What would you like this assistant to help with?",
+    "descriptionHint": "A short introduction for display. Edit SOUL.md to change behavior.",
+    "internalId": "Internal Profile ID",
+    "internalIdHint": "This stable identifier connects configuration and history. Changing the display name keeps it unchanged.",
+    "uploadAvatar": "画像をアップロード",
+    "restoreAvatar": "初期画像に戻す",
+    "avatarHint": "PNG, JPG or WebP · up to 1 MB",
+    "connectionSource": "Use a model connection from",
+    "modelConnection": "Model connection",
+    "connectLater": "Connect a model later",
+    "connectionLoadFailed": "Could not load model connections",
+    "createHint": "A fresh Bot with independent settings, memory and history. Only the selected model connection is copied; personality, skills and tasks stay separate.",
+    "saved": "Bot を保存しました",
+    "saveFailed": "Could not save Bot",
+    "configuration": "設定",
+    "configIntro": "{name} has an independent Profile. These files control its behavior; your introduction is only a display label.",
+    "workspaceHint": "The working directory belongs to each conversation. Project instructions such as AGENTS.md and HERMES.md are read from that directory.",
+    "studioTools": "Studio ツール",
+    "otherAgents": "Ekko & coding agents",
+    "waiting": "確認待ち",
+    "working": "作業中",
+    "completed": "新しい結果",
+    "ready": "準備完了",
+    "personalAssistant": "Your personal AI assistant",
+    "conversations": "会話",
+    "searchConversations": "会話を検索",
+    "tasks": "アクティビティ",
+    "greeting": "What shall we work on, {name}?",
+    "startConversation": "A space for your ideas, questions and everyday work.",
+    "you": "あなた",
+    "files": {
+        "config": {
+            "title": "Model and runtime settings",
+            "description": "Model, tools and runtime preferences. Opens the existing configuration editor."
+        },
+        "credentials": {
+            "title": "Model credentials",
+            "description": "API keys and OAuth credentials. Manage these through model settings to keep secrets protected."
+        },
+        "soul": {
+            "title": "Personality and instructions",
+            "description": "The instructions that shape this Bot’s behavior. Your display introduction does not change this file."
+        },
+        "memory": {
+            "title": "Long-term memory",
+            "description": "This Bot’s accumulated knowledge and preferences, isolated from other Profiles."
+        },
+        "skills": {
+            "title": "Skills",
+            "description": "Reusable capabilities available to this Bot. Opens the existing skills manager."
+        },
+        "cron": {
+            "title": "Scheduled tasks",
+            "description": "Scheduled work for this Profile. Opens the existing task manager."
+        }
+    }
+},
   jev: {
     browserAutomation: "内蔵ブラウザーの自動化",
     browserAutomationHint: "このプロファイルに保存した JEV 接続を使用し、次の判定から適用します。画面上のラベルを JEV に送信しますが、入力値は含みません。無効時、利用不可時、判定が不確かな場合は従来の処理を維持します。",

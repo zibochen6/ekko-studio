@@ -509,6 +509,16 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (/^\/api\/studio\/sessions\/[^/]+\/context$/.test(pathname) && request.method() === 'GET') {
+      const sessionId = decodeURIComponent(pathname.split('/').at(-2) || '')
+      const session: any = (options.sessions || []).find((item: any) => item.id === sessionId)
+      await route.fulfill(session ? jsonResponse({
+        session_id: session.id, profile: session.profile || null, source: session.source,
+        title: session.title || null, messages: session.messages || [], message_count: session.message_count || 0,
+      }) : jsonResponse({ error: 'Session not found' }, 404))
+      return
+    }
+
     if (pathname === '/api/studio/session-categories') {
       if (request.method() === 'GET') {
         await route.fulfill(jsonResponse({ categories: sessionCategories }))
@@ -1092,7 +1102,8 @@ function makeSocket(url, options) {
       return this
     },
     emit(event, payload, ack) {
-      state.emitted.push({ event, payload })
+      state.emitted.push({ event, payload, ...(event === 'run' || event === 'resume' ? { socketId: this.id } : {}) })
+      if ((event === 'run' || event === 'resume') && (String(url).endsWith('/chat-run') || String(url).endsWith('/global-agent'))) state.latest = this
       if ((event === 'run' || event === 'resume') && payload?.session_id) this.rooms.add(payload.session_id)
       if (typeof ack === 'function' && String(url).endsWith('/workflow')) {
         const data = event === 'workflow.status.subscribe'

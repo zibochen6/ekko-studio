@@ -17,7 +17,7 @@ const mockStudioSystemApi = vi.hoisted(() => ({
 
 vi.mock('@/api/hermes/system', () => mockSystemApi)
 vi.mock('@/api/studio/system', () => mockStudioSystemApi)
-vi.mock('@/api/client', () => ({ hasApiKey: () => true }))
+vi.mock('@/api/client', () => ({ hasApiKey: () => true, getActiveProfileName: () => localStorage.getItem('hermes_active_profile_name') || 'default' }))
 
 import { useAppStore } from '@/stores/hermes/app'
 
@@ -32,6 +32,43 @@ describe('App Store', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('does not apply a late model response from a different Bot', async () => {
+    let finishA!: (value: unknown) => void
+    mockSystemApi.fetchAvailableModels.mockImplementationOnce(() => new Promise(resolve => { finishA = resolve }))
+    const store = useAppStore()
+    const first = store.loadModels()
+    localStorage.setItem('hermes_active_profile_name', 'research')
+    const models = (model: string) => ({ default: model, default_provider: 'provider', groups: [{ provider: 'provider', models: [model] }], allProviders: [] })
+    mockSystemApi.fetchAvailableModels.mockResolvedValueOnce(models('b-model'))
+    await store.reloadModels()
+    finishA(models('a-model'))
+    await first
+    expect(store.selectedModel).toBe('b-model')
+    expect(store.modelsForProfile('default')?.default).toBe('a-model')
+    expect(mockSystemApi.fetchAvailableModels).toHaveBeenNthCalledWith(1, 'default')
+    expect(mockSystemApi.fetchAvailableModels).toHaveBeenNthCalledWith(2, 'research')
+  })
+
+  it('keeps the current model request alive when a background Bot also waits for its models', async () => {
+    localStorage.setItem('hermes_active_profile_name', 'research')
+    let finishB!: (value: unknown) => void
+    let finishA!: (value: unknown) => void
+    mockSystemApi.fetchAvailableModels.mockImplementation((profile: string) => new Promise(resolve => {
+      if (profile === 'research') finishB = resolve
+      else finishA = resolve
+    }))
+    const store = useAppStore()
+    const visible = store.loadModels()
+    const background = store.waitForModelsForRun(15000, 'default')
+    const models = (model: string) => ({ default: model, default_provider: 'provider', groups: [{ provider: 'provider', models: [model] }], allProviders: [] })
+    finishB(models('b-model'))
+    await visible
+    finishA(models('a-model'))
+    await background
+    expect(store.selectedModel).toBe('b-model')
+    expect(store.modelsForProfile('default')?.default).toBe('a-model')
   })
 
   it('persists desktop sidebar collapsed state to localStorage', () => {

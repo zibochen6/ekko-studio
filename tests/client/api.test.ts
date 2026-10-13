@@ -28,8 +28,17 @@ function fakeJwt(payload: Record<string, unknown>) {
 describe('API Client', () => {
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
     vi.clearAllMocks()
     Object.assign(router.currentRoute.value, { name: 'hermes.chat', query: {} })
+  })
+
+  it('keeps requests pinned to this tab when another tab changes the saved Bot', async () => {
+    sessionStorage.setItem('hermes_active_profile_name', 'research')
+    localStorage.setItem('hermes_active_profile_name', 'writer')
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    await request('/api/hermes/config')
+    expect(mockFetch.mock.calls[0]?.[1].headers['X-Hermes-Profile']).toBe('research')
   })
 
   it('uses the Models page Profile for settings requests without changing global Profile or other requests', async () => {

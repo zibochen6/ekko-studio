@@ -79,7 +79,7 @@ for (const { widths, platform } of [
           const header = headerAtWidth(width)
           await expect(header).toBeVisible()
           if (width > 768) {
-            await expect.poll(async () => (await header.boundingBox())!.height).toBe(40)
+            await expect.poll(async () => (await header.boundingBox())!.height).toBe(route === '/hermes/chat' ? 64 : 40)
             expect.soft((await header.boundingBox())!.x + (await header.boundingBox())!.width, route)
               .toBeLessThanOrEqual(width - (platform === 'win32' || platform === 'linux' ? 138 : 0) + 1)
           }

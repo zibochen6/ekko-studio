@@ -722,7 +722,8 @@ for (const endpoint of ['/api/hermes/profiles', '/api/hermes/available-models', 
     let releaseRequest!: () => void
     const responseGate = new Promise<void>(resolve => { releaseRequest = resolve })
     let requests = 0
-    await page.route(`**${endpoint}`, async route => {
+    // Model discovery includes the selected Profile in its query string.
+    await page.route(url => url.pathname === endpoint, async route => {
       requests++
       await responseGate
       await route.fallback()

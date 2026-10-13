@@ -6,6 +6,7 @@ import { nextTick } from 'vue'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { useAppStore } from '@/stores/hermes/app'
+import { clearAttachmentDrafts } from '@/utils/composer-attachment-drafts'
 import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 
 enableAutoUnmount(afterEach)
@@ -110,6 +111,7 @@ function mountForSession(
 describe('ChatInput draft persistence', () => {
   beforeEach(() => {
     localStorage.clear()
+    clearAttachmentDrafts()
     window.innerWidth = 1024
     fetchSkillsMock.mockReset()
     fetchSkillsMock.mockResolvedValue({ categories: [], archived: [] })
@@ -287,7 +289,52 @@ describe('ChatInput draft persistence', () => {
         type: 'image/jpeg',
         videoFrameFor: expect.any(String),
       }),
-    ])
+    ], expect.objectContaining({ id: 'session-video' }))
+  })
+
+  it('keeps unsent attachments with their conversation when switching away and back', async () => {
+    const wrapper = mountForSession('attachment-a', { profile: 'research' })
+    const chatStore = useChatStore()
+    const first = chatStore.activeSession!
+    const second = { ...first, id: 'attachment-b', profile: 'writer', title: 'Writer' }
+    chatStore.sessions.push(second)
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['A'], 'research.txt', { type: 'text/plain' })] })
+    await input.trigger('change')
+    expect(wrapper.text()).toContain('research.txt')
+    chatStore.activeSessionId = second.id
+    chatStore.activeSession = second
+    await nextTick()
+    expect(wrapper.findAll('.attachment-preview')).toHaveLength(0)
+    chatStore.activeSessionId = first.id
+    chatStore.activeSession = first
+    await nextTick()
+    expect(wrapper.text()).toContain('research.txt')
+  })
+
+  it('freezes the original session and model while video preparation continues after a switch', async () => {
+    const wrapper = mountForSession('video-a', { profile: 'research', model: 'model-a', workspace: '/research' })
+    const chatStore = useChatStore()
+    const send = vi.spyOn(chatStore, 'sendMessage').mockResolvedValue(undefined)
+    let resolveFrames!: (frames: File[]) => void
+    extractRepresentativeVideoFramesMock.mockReturnValue(new Promise<File[]>(resolve => { resolveFrames = resolve }))
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['video'], 'a.mp4', { type: 'video/mp4' })] })
+    await input.trigger('change')
+    await wrapper.get('textarea').setValue('Analyze A')
+    await wrapper.get('.send-button').trigger('click')
+    chatStore.activeSession!.model = 'changed-after-send'
+    const second = { ...chatStore.activeSession!, id: 'video-b', profile: 'writer', model: 'model-b', workspace: '/writer' }
+    chatStore.sessions.push(second)
+    chatStore.activeSessionId = second.id
+    chatStore.activeSession = second
+    await nextTick()
+    await wrapper.get('textarea').setValue('Keep B draft')
+    resolveFrames([new File(['frame'], 'frame.jpg', { type: 'image/jpeg' })])
+    await flushPromises()
+    expect(send).toHaveBeenCalledWith('Analyze A', expect.arrayContaining([expect.objectContaining({ name: 'a.mp4' })]), expect.objectContaining({ id: 'video-a', profile: 'research', model: 'model-a', workspace: '/research' }))
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Keep B draft')
+    expect(wrapper.findAll('.attachment-preview')).toHaveLength(0)
   })
 
   it('restores unsent text for the active session after the chat view is remounted', async () => {
@@ -720,6 +767,42 @@ describe('ChatInput draft persistence', () => {
     await nextTick()
 
     expect((textarea.element as HTMLTextAreaElement).value).toBe('/bundles pr-review-team ')
+  })
+
+  it('opens skills and bundles for the empty Hermes Bot without sending a first message', async () => {
+    const submit = vi.fn()
+    const wrapper = mountForSession('previous-session', { profile: 'previous' }, {}, {
+      draft: true, draftConfig: { agent: 'hermes', profile: 'research' }, submit,
+    })
+    await wrapper.get('textarea').setValue('/skill')
+    await wrapper.get('.send-button').trigger('click')
+    await flushPromises()
+    expect(fetchSkillsMock).toHaveBeenCalledWith('research')
+    await wrapper.get('textarea').setValue('/bundles')
+    await wrapper.get('.send-button').trigger('click')
+    await flushPromises()
+    expect(fetchSkillBundlesMock).toHaveBeenCalledWith('research')
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('ignores an unopened Bot’s late bundle response after the draft switches Profile', async () => {
+    let finish!: (value: any) => void
+    fetchSkillBundlesMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const submit = vi.fn()
+    const wrapper = mountForSession('previous-session', {}, {}, {
+      draft: true, draftConfig: { agent: 'hermes', profile: 'research' }, submit,
+    })
+    await wrapper.get('textarea').setValue('/bundles')
+    await wrapper.get('.send-button').trigger('click')
+    await wrapper.setProps({ draftConfig: { agent: 'hermes', profile: 'writer' } })
+    await wrapper.get('textarea').setValue('/bundles')
+    await wrapper.get('.send-button').trigger('click')
+    await flushPromises()
+    expect(fetchSkillBundlesMock).toHaveBeenLastCalledWith('writer')
+    finish([{ name: 'Private research bundle', commandName: 'research', skills: [], description: '' }])
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Private research bundle')
+    expect(submit).not.toHaveBeenCalled()
   })
 
   it('opens the bundle creator when /bundles create is submitted', async () => {

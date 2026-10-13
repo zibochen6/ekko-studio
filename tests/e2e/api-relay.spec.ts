@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('opens the partner page below Usage and visits the website only from its action', async ({ page, context }) => {
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   const rail = page.locator('.studio-navigation-rail')
   const relay = rail.getByRole('link', { name: 'API Relay', exact: true })
   await expect(relay).toHaveAttribute('href', '#/hermes/api-relay')
@@ -57,7 +57,7 @@ test('opens the partner page below Usage and visits the website only from its ac
 
 test('closes mobile navigation on the partner page and keeps the card within the viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 })
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   const drawer = page.locator('.studio-mobile-drawer')
   await drawer.getByRole('link', { name: 'API Relay', exact: true }).click()

@@ -242,7 +242,9 @@ describe('gateway-runner supervision', () => {
     startGatewayRunManaged('/usr/bin/hermes', { profileDir: '/tmp/delete-me' })
     expect(fakeChildren).toHaveLength(1)
 
-    const retired = retireManagedGatewayForProfile('/tmp/delete-me', { timeoutMs: 5000, platform: 'linux' })
+    const retired = retireManagedGatewayForProfile('/tmp/delete-me', {
+      timeoutMs: 5000, platform: 'linux', listPosixDescendantPids: () => [], killPosixPid: vi.fn(),
+    })
     expect(fakeChildren[0].killSignals).toEqual(['SIGTERM'])
 
     fakeChildren[0].emit('exit', 0, 'SIGTERM')
@@ -263,7 +265,10 @@ describe('gateway-runner supervision', () => {
     startGatewayRunManaged('/usr/bin/hermes', { profileDir: '/tmp/shutdown-b' })
     expect(fakeChildren).toHaveLength(2)
 
-    const shutdown = shutdownManagedGateways({ timeoutMs: 5000, platform: 'linux' })
+    // Fake PIDs must never inspect or signal real processes on the test host.
+    const shutdown = shutdownManagedGateways({
+      timeoutMs: 5000, platform: 'linux', listPosixDescendantPids: () => [], killPosixPid: vi.fn(),
+    })
 
     expect(fakeChildren[0].killSignals).toEqual(['SIGTERM'])
     expect(fakeChildren[1].killSignals).toEqual(['SIGTERM'])
@@ -375,7 +380,9 @@ describe('gateway-runner supervision', () => {
 
     startGatewayRunManaged('/usr/bin/hermes', { profileDir: '/tmp/shutdown-d' })
 
-    const shutdown = shutdownManagedGateways({ timeoutMs: 1000, platform: 'linux' })
+    const shutdown = shutdownManagedGateways({
+      timeoutMs: 1000, platform: 'linux', listPosixDescendantPids: () => [], killPosixPid: vi.fn(),
+    })
     expect(fakeChildren[0].killSignals).toEqual(['SIGTERM'])
 
     await vi.advanceTimersByTimeAsync(1000)

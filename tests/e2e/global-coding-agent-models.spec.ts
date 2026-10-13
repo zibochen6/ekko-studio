@@ -11,7 +11,7 @@ const catalog = { agentId: 'codex', name: 'Codex', status: 'ready', source: 'app
   ], checkedAt: '2026-10-11T00:00:00.000Z', cached: false }
 
 async function openGlobalDraft(page: Page, mobile = false) {
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await selectNewChatAgent(page, 'Codex')
@@ -46,7 +46,7 @@ for (const mobile of [false, true]) test(`Claude shows and searches resolved mod
       { id: 'haiku', name: 'claude-haiku-5-5', resolvedModel: 'claude-haiku-5-5' },
     ],
   }] } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await selectNewChatAgent(page, 'Claude')
@@ -149,7 +149,7 @@ for (const mobile of [false, true]) for (const native of [
     writes.push(body)
     await route.fulfill({ json: { ok: true, model: body.model, reasoning_effort: body.reasoningEffort } })
   })
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await selectNewChatAgent(page, native.name)
@@ -226,7 +226,7 @@ for (const native of [
       { id: native.model, name: native.model, provider: 'current-route', isDefault: true, reasoningEfforts: native.efforts },
     ],
   }] } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await selectNewChatAgent(page, native.name)
   await selectNewChatLaunchMode(page, 'global')

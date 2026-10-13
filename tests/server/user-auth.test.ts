@@ -62,6 +62,20 @@ describe('user auth tables and middleware', () => {
     expect(payload.exp - payload.iat).toBe(60 * 60 * 24 * 30)
   })
 
+  it('adds Bot ownership without replacing other grants or changing the current default', async () => {
+    const { users } = await initUsers()
+    const user = users.createUser({ username: 'bot-owner', password: 'test-pass', profiles: ['research'], defaultProfile: 'research' })!
+    expect(users.grantUserProfile(user.id, 'bot-a')).toBe(true)
+    expect(users.grantUserProfile(user.id, 'bot-b')).toBe(true)
+    expect(users.grantUserProfile(user.id, 'bot-a')).toBe(true)
+    expect(users.listUserProfiles(user.id).map(profile => profile.profile_name)).toEqual(['research', 'bot-a', 'bot-b'])
+    expect(users.getDefaultProfileForUser(user.id)).toBe('research')
+    expect(users.grantUserProfile(999999, 'unowned')).toBe(false)
+    users.updateUser({ userId: user.id, status: 'disabled' })
+    expect(users.grantUserProfile(user.id, 'bot-c')).toBe(false)
+    expect(users.userCanAccessProfile(user.id, 'bot-c')).toBe(false)
+  })
+
   it('allows configuring the user JWT lifetime with HERMES_WEB_UI_AUTH_JWT_EXPIRES_IN', async () => {
     vi.stubEnv('HERMES_WEB_UI_AUTH_JWT_EXPIRES_IN', '12h')
     const { auth } = await initUsers()

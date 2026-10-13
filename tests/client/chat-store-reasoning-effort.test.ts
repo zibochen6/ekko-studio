@@ -91,7 +91,7 @@ describe('chat store per-session reasoning effort', () => {
     await store.setSessionReasoningEffort('s1', 'low')
 
     expect(store.sessions[0].reasoningEffort).toBe('low')
-    expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith('s1', 'low')
+    expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith('s1', 'low', undefined, 'default')
   })
 
   it('persists and sends a paired global model variant when changing effort', async () => {
@@ -99,7 +99,7 @@ describe('chat store per-session reasoning effort', () => {
     const session = store.newChat({ codingAgentId: 'cursor', codingAgentMode: 'global', model: 'native-high', reasoningEffort: 'high' })
     session.isLocalOnly = false
     await store.setSessionReasoningEffort(session.id, 'low', 'native-low')
-    expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith(session.id, 'low', 'native-low')
+    expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith(session.id, 'low', 'native-low', 'default')
     await store.sendMessage('Continue with low effort')
     expect(chatApi.startRunViaSocket.mock.calls.at(-1)?.[0]).toMatchObject({ model: 'native-low', reasoning_effort: 'low' })
   })
@@ -181,7 +181,7 @@ describe('chat store per-session reasoning effort', () => {
     await store.setSessionReasoningEffort('s2', '')
 
     expect(store.sessions[0].reasoningEffort).toBeUndefined()
-    expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith('s2', '')
+    expect(sessionsApi.setSessionReasoningEffort).toHaveBeenCalledWith('s2', '', undefined, 'default')
   })
 
   it('keeps each session independent', async () => {
@@ -259,7 +259,7 @@ describe('chat store per-session reasoning effort', () => {
     await expect(store.setSessionPushEnabled(session.id, true)).resolves.toBe(true)
 
     expect(session.pushEnabled).toBe(true)
-    expect(sessionsApi.setSessionPushEnabled).toHaveBeenCalledWith(session.id, true)
+    expect(sessionsApi.setSessionPushEnabled).toHaveBeenCalledWith(session.id, true, 'default')
   })
 
   it('keeps a local-only push choice for the first run without calling the session endpoint', async () => {
@@ -321,8 +321,8 @@ describe('chat store per-session reasoning effort', () => {
     finishFirstWrite?.(true)
     await Promise.all([firstWrite, lastWrite])
     expect(sessionsApi.setSessionReasoningEffort.mock.calls).toEqual([
-      [session.id, 'low'],
-      [session.id, 'max'],
+      [session.id, 'low', undefined, 'default'],
+      [session.id, 'max', undefined, 'default'],
     ])
     expect(session.reasoningEffort).toBe('max')
   })
@@ -347,7 +347,7 @@ describe('chat store per-session reasoning effort', () => {
     finishWrite?.(true)
     await reasoningWrite
     await expect(modelWrite).resolves.toBe(true)
-    expect(sessionsApi.setSessionModel).toHaveBeenCalledWith(session.id, 'new-model', 'openai', undefined)
+    expect(sessionsApi.setSessionModel).toHaveBeenCalledWith(session.id, 'new-model', 'openai', undefined, 'default')
     expect(session.reasoningEffort).toBeUndefined()
   })
 

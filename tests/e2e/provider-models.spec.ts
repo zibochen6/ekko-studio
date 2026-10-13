@@ -117,7 +117,7 @@ for (const mode of ['scoped', 'global']) test(`DSH ${mode} chat selects its mode
   const api = await mockHermesApi(page)
   await mockChatSocket(page)
   await page.route('**/api/coding-agents', route => route.fulfill({ json: { tools: [{ id: 'dsh', name: 'DeepSeek Harness', installed: true }] } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat' }).click()
   await selectNewChatAgent(page, 'DeepSeek Harness')
   if (mode === 'global') await selectNewChatLaunchMode(page, 'global')

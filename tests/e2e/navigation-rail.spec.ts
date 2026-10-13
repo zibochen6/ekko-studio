@@ -9,9 +9,9 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/hermes/write-gate/pending**', route => route.fulfill({ json: { pending: [] } }))
 })
 
-test('keeps global navigation and account controls available when the conversation list is collapsed', async ({ page }) => {
+test('keeps Studio tools and account controls available with a collapsed list, then returns to the Bot workspace', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   const rail = page.locator('.studio-navigation-rail')
   const sidebar = page.locator('.chat-panel > .session-list')
   const main = page.locator('.chat-panel > .chat-main')
@@ -55,17 +55,21 @@ test('keeps global navigation and account controls available when the conversati
   await expect(rail.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page')
   await rail.getByRole('link', { name: 'Chat', exact: true }).click()
   await expect(page).toHaveURL(/#\/hermes\/chat$/)
-  await expect(sidebar.getByRole('button', { name: 'Search', exact: true })).toBeVisible()
-  await sidebar.getByRole('button', { name: 'Search', exact: true }).click()
-  await expect(page.locator('.session-search-modal')).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect(page.locator('.bot-sidebar')).toBeVisible()
+  await expect(page.locator('.bot-row__select[aria-current="page"]')).toContainText('research')
+  await expect(rail).toHaveCount(0)
+  const search = sidebar.getByRole('textbox', { name: 'Search conversations', exact: true })
+  await expect(search).toBeVisible()
+  await search.fill('a conversation to find')
+  await expect(search).toHaveValue('a conversation to find')
+  await search.clear()
   await sidebar.getByRole('button', { name: 'New Chat', exact: true }).click()
   await expect(page.locator('.new-chat-page')).toBeVisible()
 })
 
 test('opens the two-column mobile drawer and restores the desktop rail after resizing', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await expect(page.locator('.studio-navigation-rail')).toBeVisible()
   await page.setViewportSize({ width: 390, height: 800 })
   await expect(page.locator('.studio-navigation-rail')).not.toBeVisible()
@@ -137,6 +141,8 @@ test('navigates through the shared mobile rail and closes it on leaf pages', asy
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await drawer.getByRole('link', { name: 'Chat', exact: true }).click()
   await expect(page).toHaveURL(/#\/hermes\/chat$/)
+  await expect(drawer.locator('.bot-sidebar')).toBeVisible()
+  await expect(drawer.locator('.studio-navigation-rail')).toHaveCount(0)
   await expect(drawer.locator('.session-list .session-items')).toBeVisible()
 })
 
@@ -167,9 +173,9 @@ test('places Usage below Models as a standalone page with its own active navigat
   await expect(drawer).not.toBeVisible()
 })
 
-test('keeps both navigation levels while switching lists and settings on mobile', async ({ page }) => {
+test('keeps both Studio navigation levels on mobile and returns to the Bot drawer', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 })
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   const drawer = page.locator('.studio-mobile-drawer')
   const rail = drawer.locator('.studio-navigation-rail')
@@ -178,7 +184,6 @@ test('keeps both navigation levels while switching lists and settings on mobile'
     ['Workflow', '.workflow-sidebar', '/hermes/workflow'],
     ['Group Chat', '.room-sidebar', '/hermes/group-chat'],
     ['Settings', '.sidebar', '/hermes/settings'],
-    ['Chat', '.session-list', '/hermes/chat'],
   ]) {
     await rail.getByRole('link', { name, exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`#${route}$`))
@@ -197,6 +202,13 @@ test('keeps both navigation levels while switching lists and settings on mobile'
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.keyboard.press('Escape')
   await expect(drawer).not.toBeVisible()
+  await page.getByRole('button', { name: 'Menu', exact: true }).click()
+  await rail.getByRole('link', { name: 'Chat', exact: true }).click()
+  await expect(page).toHaveURL(/#\/hermes\/chat$/)
+  await expect(drawer.locator('.bot-sidebar')).toBeVisible()
+  await expect(drawer.locator('.session-list')).toBeVisible()
+  await expect(drawer.locator('.studio-navigation-rail')).toHaveCount(0)
+  await expect(page.locator('.page-sidebar-account-btn')).toHaveCount(1)
 })
 
 test('keeps populated history open after automatic loading and closes only on session selection', async ({ page }) => {
@@ -230,7 +242,7 @@ test('keeps populated history open after automatic loading and closes only on se
     } })
   })
   await page.setViewportSize({ width: 390, height: 800 })
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   const drawer = page.locator('.studio-mobile-drawer')
   await drawer.getByRole('link', { name: 'History', exact: true }).click()
@@ -264,7 +276,7 @@ test('keeps populated history open after automatic loading and closes only on se
 })
 
 for (const width of [320, 390]) {
-  test(`shows the single-chat title and keeps actions visible on a ${width}px phone`, async ({ page }) => {
+  test(`shows Bot identity and the current chat title with visible actions on a ${width}px phone`, async ({ page }) => {
     const title = 'A long conversation title that should remain visible beside the mobile header actions'
     await page.addInitScript(() => {
       (window as any).__PW_CHAT_SOCKET_RESUMES__ = {
@@ -279,20 +291,22 @@ for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 800 })
     await page.goto('/#/hermes/chat')
     const header = page.locator('.chat-panel .chat-header')
-    await expect(header.locator('.header-session-title')).toBeVisible()
+    await expect(header.locator('.bot-header-identity')).toContainText('research')
+    await expect(header.locator('.bot-header-identity')).toBeVisible()
     await page.getByRole('button', { name: 'Menu', exact: true }).click()
     await page.locator('.studio-mobile-drawer .session-item').filter({ hasText: title }).first().click()
     await expect(page.locator('.studio-mobile-drawer')).not.toBeVisible()
-    await expect(header.locator('.header-session-title')).toHaveText(title)
-    await expect(header.locator('.header-session-title')).toBeVisible()
-    const titleBox = (await header.locator('.header-session-title').boundingBox())!
+    await expect(header.locator('.bot-header-session-title')).toHaveText(title)
+    await expect(header.locator('.bot-header-session-title')).toBeVisible()
+    await expect(header.locator('.bot-header-identity strong')).toHaveText('research')
+    const titleBox = (await header.locator('.bot-header-session-title').boundingBox())!
     const actionsBox = (await header.locator('.header-actions').boundingBox())!
     const menuBox = (await page.getByRole('button', { name: 'Menu', exact: true }).boundingBox())!
     expect(titleBox.width).toBeGreaterThan(80)
     expect(titleBox.x).toBeGreaterThanOrEqual(menuBox.x + menuBox.width)
     expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(actionsBox.x)
     expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(width)
-    await expect(header.locator('.header-session-title')).toHaveCSS('text-overflow', 'ellipsis')
+    await expect(header.locator('.bot-header-session-title')).toHaveCSS('text-overflow', 'ellipsis')
     await expect(header.getByRole('button', { name: 'Session actions', exact: true })).toBeInViewport()
     await page.screenshot({ path: `/tmp/studio-mobile-chat-title-${width}.png`, animations: 'disabled' })
   })
@@ -343,7 +357,8 @@ test('scrolls a populated list within a small phone drawer and closes after sele
   const list = drawer.locator('.session-items')
   await expect(list.getByRole('link', { name: /Mobile conversation 23/ }).last()).toBeAttached()
   await list.getByRole('link', { name: /Mobile conversation 23/ }).last().scrollIntoViewIfNeeded()
-  await expect(drawer.getByRole('link', { name: 'Settings', exact: true })).toBeInViewport()
+  await expect(drawer.getByRole('button', { name: 'Studio tools', exact: true })).toBeInViewport()
+  await expect(drawer.locator('.bot-sidebar')).toBeVisible()
   expect(await drawer.boundingBox()).toMatchObject({ x: 0, y: 0, width: 288, height: 568 })
   expect(await list.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
   await page.screenshot({ path: '/tmp/studio-mobile-two-level-small.png', animations: 'disabled' })

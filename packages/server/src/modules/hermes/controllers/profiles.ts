@@ -2,7 +2,7 @@ import { createReadStream, existsSync, readFileSync, renameSync, rmSync, writeFi
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
 import { tmpdir } from 'os'
-import { getWebUiHome } from '../../studio/public/config'
+import { randomUUID } from 'crypto'
 import * as hermesCli from '../services/runtime/cli'
 import { SessionDeleter } from '../services/history/session-deleter'
 import { AgentBridgeClient } from '../services/bridge'
@@ -15,9 +15,11 @@ import { logger } from '../../studio/public/logging'
 import { smartCloneCleanup, copyModelProviderAuthForClone } from '../services/profiles/profile-credentials'
 import { detectHermesRootHome } from '../services/runtime/path'
 import { getActiveProfileName, listProfileNamesFromDisk } from '../services/profiles/profile'
-import { listProfilesFromDisk, type HermesProfile } from '../services/profiles/catalog'
+import { listProfilesFromDisk, readProfileDetailFromDisk, type HermesProfile } from '../services/profiles/catalog'
 import {
   createProfileWithoutHermes,
+  existingProfileDirectory,
+  withProfileMutationLock,
   deleteProfileWithoutHermes,
   isReservedProfileName,
   normalizeProfileName,
@@ -26,9 +28,11 @@ import {
 } from '../services/profiles/lifecycle'
 import { exportProfileWithoutHermes, importProfileWithoutHermes } from '../services/profiles/archive'
 import { HermesSkillInjector } from '../services/skills/injector'
-import { listUserProfiles } from '../../studio/public/users'
+import { grantUserProfile, listUserProfiles } from '../../studio/public/users'
 import { isHermesAgentAvailable } from '../../studio/public/agent-status-registry'
 import { readAppProfileAvatar } from '../services/profiles/app-profile-avatar'
+import { profileMetadataDir, readProfileIdentity, saveProfileIdentity, validateProfileIdentity } from '../services/profiles/identity'
+import { prepareBotConnection, validateSourceConnection } from '../services/profiles/bot-connection'
 
 const bridgeCleanupClient = () => new AgentBridgeClient({ connectRetryMs: 0, timeoutMs: 5000 })
 const bridgeProfileRestartClient = () => new AgentBridgeClient({ connectRetryMs: 0 })
@@ -129,15 +133,6 @@ function denyProfile(ctx: any, profileName: string): boolean {
   return true
 }
 
-function profileMetadataRoot(): string {
-  return join(getWebUiHome(), 'profile-metadata')
-}
-
-function profileMetadataDir(name: string): string {
-  const segment = Buffer.from(name || 'default', 'utf-8').toString('base64url')
-  return join(profileMetadataRoot(), segment)
-}
-
 function profileAvatarMetaPath(name: string): string {
   return join(profileMetadataDir(name), 'avatar.json')
 }
@@ -177,6 +172,7 @@ function readProfileAvatar(name: string): ProfileAvatarResponse | null {
 function attachProfileAvatars<T extends HermesProfile>(profiles: T[]): Array<T & { avatar: ProfileAvatarResponse | null }> {
   return profiles.map(profile => ({
     ...profile,
+    ...readProfileIdentity(profile.name),
     avatar: readProfileAvatar(profile.name),
   }))
 }
@@ -186,6 +182,7 @@ async function attachAppProfileAvatars<T extends HermesProfile>(
 ): Promise<Array<T & { avatar: ProfileAvatarResponse | null }>> {
   return Promise.all(profiles.map(async profile => ({
     ...profile,
+    ...readProfileIdentity(profile.name),
     avatar: await readAppProfileAvatar(profile.name),
   })))
 }
@@ -368,65 +365,91 @@ export async function listForApp(ctx: any) {
 }
 
 export async function create(ctx: any) {
-  const { name: requestedName, clone } = ctx.request.body as { name?: string; clone?: boolean }
+  const { name: requestedName, clone, displayName, description, sourceConnection } = ctx.request.body as {
+    name?: string; clone?: boolean; displayName?: string; description?: string; sourceConnection?: unknown
+  }
   try {
-    const name = validateProfileName(requestedName)
-    const useHermes = isHermesAgentAvailable()
-    const output = useHermes
-      ? await hermesCli.createProfile(name, clone)
-      : `Profile '${(await createProfileWithoutHermes(name, Boolean(clone))).name}' created by Studio`
+    const botCreation = requestedName === undefined || displayName !== undefined || description !== undefined || sourceConnection !== undefined
+    if (botCreation && clone) throw new ProfileLifecycleError('Bot creation cannot clone a Profile', 400, 'profile_connection_invalid')
+    const identity = validateProfileIdentity({ displayName, description })
+    const name = validateProfileName(requestedName ?? `bot-${randomUUID().slice(0, 12)}`)
+    const source = sourceConnection === undefined ? undefined : validateSourceConnection(sourceConnection)
+    if (source && denyProfile(ctx, source.profile)) return
+    const initialize = source ? await prepareBotConnection(source) : undefined
+    return await withProfileMutationLock([name], async () => {
+      const useHermes = !botCreation && isHermesAgentAvailable()
+      const output = useHermes
+        ? await hermesCli.createProfile(name, clone)
+        : `Profile '${(await createProfileWithoutHermes(name, Boolean(clone), undefined, initialize)).name}' created by Studio`
 
-    // clone=true 时执行智能清理：
-    //   - 删除 .env 中的独占平台凭据（Weixin / Telegram / Slack / ...）
-    //   - 禁用 config.yaml 中对应的平台节点
-    // 避免新 profile 与源 profile 共享同一个 bot token 导致互斥冲突。
-    let strippedCredentials: string[] = []
-    let disabledPlatforms: string[] = []
-    let strippedConfigCredentials: string[] = []
-    let copiedAuthProviders: string[] = []
-    if (clone) {
       try {
-        copiedAuthProviders = copyModelProviderAuthForClone(name)
-        const cleanup = smartCloneCleanup(name)
-        strippedCredentials = cleanup.strippedCredentials
-        disabledPlatforms = cleanup.disabledPlatforms
-        strippedConfigCredentials = cleanup.strippedConfigCredentials
-        if (
-          strippedCredentials.length > 0 ||
-          disabledPlatforms.length > 0 ||
-          strippedConfigCredentials.length > 0 ||
-          copiedAuthProviders.length > 0
-        ) {
-          logger.info(
-            'Smart clone cleanup for "%s": copied auth for %d model providers (%s), stripped %d env credentials (%s), disabled %d platforms (%s), stripped %d config credentials (%s)',
-            name,
-            copiedAuthProviders.length, copiedAuthProviders.join(','),
-            strippedCredentials.length, strippedCredentials.join(','),
-            disabledPlatforms.length, disabledPlatforms.join(','),
-            strippedConfigCredentials.length, strippedConfigCredentials.join(','),
-          )
+        if (botCreation || Object.keys(identity).length > 0) await saveProfileIdentity(name, identity, botCreation ? { profileOnlyCredentials: true } : {})
+        const user = ctx.state?.user
+        if (botCreation && user && user.role !== 'super_admin' && !grantUserProfile(user.id, name)) {
+          throw new Error('Could not grant access to the new Bot')
         }
-      } catch (err: any) {
-        // 清理失败不应阻断 profile 创建，仅记日志
-        logger.error(err, 'Smart clone cleanup failed for "%s"', name)
+      } catch (err) {
+        if (botCreation) {
+          await deleteProfileWithoutHermes(name)
+          removeProfileMetadata(name)
+        }
+        throw err
       }
-    }
 
-    await injectBundledSkillsForProfile(name)
-    setRuntimeStatusCache({
-      profile: name,
-      bridge: { running: false, profile: name, reachable: false, error: undefined },
-      gateway: { running: false, profile: name },
+      // clone=true 时执行智能清理：
+      //   - 删除 .env 中的独占平台凭据（Weixin / Telegram / Slack / ...）
+      //   - 禁用 config.yaml 中对应的平台节点
+      // 避免新 profile 与源 profile 共享同一个 bot token 导致互斥冲突。
+      let strippedCredentials: string[] = []
+      let disabledPlatforms: string[] = []
+      let strippedConfigCredentials: string[] = []
+      let copiedAuthProviders: string[] = []
+      if (clone) {
+        try {
+          copiedAuthProviders = copyModelProviderAuthForClone(name)
+          const cleanup = smartCloneCleanup(name)
+          strippedCredentials = cleanup.strippedCredentials
+          disabledPlatforms = cleanup.disabledPlatforms
+          strippedConfigCredentials = cleanup.strippedConfigCredentials
+          if (
+            strippedCredentials.length > 0 ||
+            disabledPlatforms.length > 0 ||
+            strippedConfigCredentials.length > 0 ||
+            copiedAuthProviders.length > 0
+          ) {
+            logger.info(
+              'Smart clone cleanup for "%s": copied auth for %d model providers (%s), stripped %d env credentials (%s), disabled %d platforms (%s), stripped %d config credentials (%s)',
+              name,
+              copiedAuthProviders.length, copiedAuthProviders.join(','),
+              strippedCredentials.length, strippedCredentials.join(','),
+              disabledPlatforms.length, disabledPlatforms.join(','),
+              strippedConfigCredentials.length, strippedConfigCredentials.join(','),
+            )
+          }
+        } catch (err: any) {
+          // 清理失败不应阻断 profile 创建，仅记日志
+          logger.error(err, 'Smart clone cleanup failed for "%s"', name)
+        }
+      }
+
+      await injectBundledSkillsForProfile(name)
+      setRuntimeStatusCache({
+        profile: name,
+        bridge: { running: false, profile: name, reachable: false, error: undefined },
+        gateway: { running: false, profile: name },
+      })
+
+      ctx.body = {
+        success: true,
+        name,
+        profile: attachProfileAvatars([{ name, active: false, alias: '', model: source?.model || '—' }])[0],
+        message: output.trim(),
+        strippedCredentials,
+        disabledPlatforms,
+        strippedConfigCredentials,
+        copiedAuthProviders,
+      }
     })
-
-    ctx.body = {
-      success: true,
-      message: output.trim(),
-      strippedCredentials,
-      disabledPlatforms,
-      strippedConfigCredentials,
-      copiedAuthProviders,
-    }
   } catch (err: any) {
     if (respondWithProfileLifecycleError(ctx, err)) return
     ctx.status = 500
@@ -435,19 +458,41 @@ export async function create(ctx: any) {
 }
 
 export async function get(ctx: any) {
-  const name = String(ctx.params.name || '').trim() || 'default'
+  const name = normalizeProfileName(ctx.params.name) || 'default'
   if (denyProfile(ctx, name)) return
   try {
-    const profile = await hermesCli.getProfile(name)
-    ctx.body = { profile: { ...profile, avatar: readProfileAvatar(profile.name) } }
+    const profile = await readProfileDetailFromDisk(name)
+    ctx.body = { profile: { ...profile, ...readProfileIdentity(profile.name), avatar: readProfileAvatar(profile.name) } }
   } catch (err: any) {
+    if (respondWithProfileLifecycleError(ctx, err)) return
     ctx.status = err.message.includes('not found') ? 404 : 500
     ctx.body = { error: err.message }
   }
 }
 
+export async function updateIdentity(ctx: any) {
+  return withProfileMutationLock([ctx.params.name || 'default'], () => updateIdentityLocked(ctx))
+}
+
+async function updateIdentityLocked(ctx: any) {
+  const name = normalizeProfileName(ctx.params.name) || 'default'
+  if (denyProfile(ctx, name)) return
+  try {
+    await existingProfileDirectory(name)
+    ctx.body = { identity: await saveProfileIdentity(name, ctx.request.body) }
+  } catch (err: any) {
+    if (respondWithProfileLifecycleError(ctx, err)) return
+    ctx.status = 500
+    ctx.body = { error: err.message }
+  }
+}
+
 export async function updateAvatar(ctx: any) {
-  const name = String(ctx.params.name || '').trim() || 'default'
+  return withProfileMutationLock([ctx.params.name || 'default'], () => updateAvatarLocked(ctx))
+}
+
+async function updateAvatarLocked(ctx: any) {
+  const name = normalizeProfileName(ctx.params.name) || 'default'
   if (denyProfile(ctx, name)) return
   if (isForbiddenProfileName(name)) {
     ctx.status = 400
@@ -456,6 +501,7 @@ export async function updateAvatar(ctx: any) {
   }
   const body = ctx.request.body as { type?: string; seed?: string; dataUrl?: string }
   try {
+    await existingProfileDirectory(name)
     const dir = profileMetadataDir(name)
     await mkdir(dir, { recursive: true })
     const updatedAt = Date.now()
@@ -481,18 +527,26 @@ export async function updateAvatar(ctx: any) {
     ctx.status = 400
     ctx.body = { error: 'Invalid avatar payload' }
   } catch (err: any) {
+    if (respondWithProfileLifecycleError(ctx, err)) return
     ctx.status = 400
     ctx.body = { error: err.message }
   }
 }
 
 export async function deleteAvatar(ctx: any) {
-  const name = String(ctx.params.name || '').trim() || 'default'
+  return withProfileMutationLock([ctx.params.name || 'default'], () => deleteAvatarLocked(ctx))
+}
+
+async function deleteAvatarLocked(ctx: any) {
+  const name = normalizeProfileName(ctx.params.name) || 'default'
   if (denyProfile(ctx, name)) return
   try {
-    removeProfileMetadata(name)
+    await existingProfileDirectory(name)
+    rmSync(profileAvatarMetaPath(name), { force: true })
+    rmSync(profileAvatarImagePath(name), { force: true })
     ctx.body = { success: true }
   } catch (err: any) {
+    if (respondWithProfileLifecycleError(ctx, err)) return
     ctx.status = 500
     ctx.body = { error: err.message }
   }
@@ -619,6 +673,10 @@ export async function restartProfileRuntime(ctx: any) {
 }
 
 export async function remove(ctx: any) {
+  return withProfileMutationLock([ctx.params.name], () => removeLocked(ctx))
+}
+
+async function removeLocked(ctx: any) {
   const requestedName = ctx.params.name
   const normalizedName = normalizeProfileName(requestedName)
   if (normalizedName === 'default') {
@@ -669,6 +727,10 @@ export async function remove(ctx: any) {
 }
 
 export async function rename(ctx: any) {
+  return withProfileMutationLock([ctx.params.name, ctx.request.body?.new_name], () => renameLocked(ctx))
+}
+
+async function renameLocked(ctx: any) {
   if (denyProfile(ctx, ctx.params.name)) return
   const { new_name } = ctx.request.body as { new_name?: string }
   if (!new_name) {

@@ -183,7 +183,7 @@ softwareTest.describe('Windows new-chat effects with software rendering', () => 
     await authenticate(page, TEST_ACCESS_KEY, 'research')
     await mockChatSocket(page)
     await mockHermesApi(page)
-    await page.goto('/#/hermes/chat')
+    await page.goto('/#/hermes/chat?studio=1')
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
     const draft = page.locator('.new-chat-page')
     await expect(draft.locator('.agent-cards')).toHaveAttribute('aria-busy', 'false')
@@ -349,15 +349,16 @@ test('reserves the macOS traffic-light area above the avatar in LTR and RTL', as
   await expect.poll(() => topGutterDragRegion(page)).toEqual({ appRegion: 'drag', height: '40px' })
 })
 
-test('keeps chat and group actions below the shared macOS header', async ({ page }) => {
+test('keeps Bot chat and group actions below their macOS headers', async ({ page }) => {
   await openDesktopPageSidebar(page, 'darwin', '/#/hermes/chat')
 
   const chatSidebar = page.locator('.chat-panel > .session-list')
-  const newChat = chatSidebar.locator('.page-sidebar-tab').first()
+  const newChat = chatSidebar.locator('.bot-new-chat')
   await expect(newChat).toBeVisible()
-  expect((await chatSidebar.boundingBox())?.y).toBe(40)
-  expect((await newChat.boundingBox())?.x).toBeGreaterThanOrEqual(64)
-  expect((await page.locator('.studio-navigation-rail .page-sidebar-account-btn').boundingBox())?.y).toBeGreaterThanOrEqual(44)
+  expect((await chatSidebar.boundingBox())?.y).toBe(64)
+  expect((await newChat.boundingBox())?.x).toBeGreaterThanOrEqual(200)
+  expect((await page.locator('.bot-sidebar__brand').boundingBox())?.y).toBeGreaterThanOrEqual(44)
+  await expect(page.locator('.bot-sidebar .page-sidebar-account-btn')).toBeVisible()
 
   await page.goto('/#/hermes/group-chat')
   const groupSidebar = page.locator('.group-chat-panel > .room-sidebar')
@@ -463,14 +464,14 @@ test('does not reserve macOS traffic-light spacing in Windows chat sidebars', as
 
   const sidebar = page.locator('.chat-panel > .session-list')
   const sidebarTop = page.locator('.chat-panel > .session-list > .page-sidebar-top')
-  const newChat = sidebarTop.locator('.page-sidebar-tab').first()
+  const newChat = sidebarTop.locator('.bot-new-chat')
   const main = page.locator('.chat-panel > .chat-main')
   const controls = page.locator('.desktop-titlebar')
-  await expect(sidebarTop).toHaveCSS('padding-top', '12px')
+  await expect(sidebarTop).toHaveCSS('padding-top', '24px')
   await expect(sidebarTop).toHaveCSS('-webkit-app-region', 'drag')
   await expect(newChat).toHaveCSS('-webkit-app-region', 'no-drag')
-  expect((await sidebar.boundingBox())?.y).toBe(40)
-  expect((await main.boundingBox())?.y).toBe(40)
+  expect((await sidebar.boundingBox())?.y).toBe(64)
+  expect((await main.boundingBox())?.y).toBe(64)
   expect((await controls.boundingBox())!.x + (await controls.boundingBox())!.width).toBe(page.viewportSize()!.width)
   await expect(page.locator('.studio-page-header > .desktop-titlebar')).toHaveCount(1)
 })
@@ -594,9 +595,23 @@ test('allows creating a tab at capacity and displays the replacement state', asy
 test('embeds the desktop browser beside workspace and terminal', async ({ page }) => {
   await installDesktopBridge(page, 'darwin', true)
   await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript(() => {
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+      'browser-workspace-chat': {
+        session_id: 'browser-workspace-chat', messages: [], isWorking: false,
+        messageLoadedCount: 0, messageTotal: 0,
+      },
+    }
+  })
   await mockChatSocket(page)
-  await mockHermesApi(page)
-  await page.goto('/#/hermes/chat')
+  const session = {
+    id: 'browser-workspace-chat', title: 'Browser workspace', source: 'cli',
+    model: 'test-model', provider: 'test-provider', profile: 'research',
+    started_at: 1_800_000_000, ended_at: null, last_active: 1_800_000_100, message_count: 0,
+  }
+  await mockHermesApi(page, { sessions: [session] })
+  await page.goto('/#/hermes/session/browser-workspace-chat?profile=research')
+  await expect(page.locator('.message-list-shell')).toBeVisible()
 
   await page.locator('.header-tool-toggle').click()
   const toolPanel = page.locator('.chat-tool-panel')

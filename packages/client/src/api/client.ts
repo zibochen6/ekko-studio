@@ -49,6 +49,7 @@ export function clearApiKey() {
 function clearAuthSessionState() {
   clearApiKey()
   localStorage.removeItem(ACTIVE_PROFILE_STORAGE_KEY)
+  sessionStorage.removeItem(ACTIVE_PROFILE_STORAGE_KEY)
 }
 
 export function hasApiKey(): boolean {
@@ -105,7 +106,7 @@ export function getStoredUserId(): number | null {
 }
 
 export function getActiveProfileName(): string | null {
-  return localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY)
+  return sessionStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY) || localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY)
 }
 
 // The Models page keeps its filter in the URL; it never changes the active Profile.
@@ -207,7 +208,7 @@ function responseErrorCode(text: string): string | undefined {
 }
 
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const selectedProfile = modelSettingsRequestProfile(path)
+  const selectedProfile = modelSettingsRequestProfile(path) || getActiveProfileName()
   await ensureDesktopAuthReady()
   const base = getBaseUrl()
   const url = `${base}${path}`
@@ -224,7 +225,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 
   // Inject active profile header for request-scoped endpoints. Explicit profile
   // selectors in the URL/body and profile-name routes are validated directly.
-  const profileName = selectedProfile || getActiveProfileName()
+  const profileName = selectedProfile
   if (profileName && !new Headers(options.headers).has('X-Hermes-Profile') && shouldAttachProfileHeader(path, options)) {
     headers['X-Hermes-Profile'] = profileName
   }

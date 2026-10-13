@@ -13,7 +13,7 @@ async function warmDraft(page: Page) {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await mockHermesApi(page)
   await mockChatSocket(page)
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const draft = page.locator('.new-chat-page')
   await draft.locator('textarea').fill('Hello')
@@ -98,7 +98,7 @@ test('an unavailable inventory disables creation without holding the configurati
   await mockHermesApi(page)
   await mockChatSocket(page)
   await page.route('**/api/agents/availability', route => route.fulfill({ status: 503, json: { error: 'Inventory unavailable' } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   const failedResponse = page.waitForResponse('**/api/agents/availability')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await failedResponse
@@ -128,7 +128,7 @@ for (const mode of ['scoped', 'global']) {
       await route.fallback()
     })
     try {
-      await page.goto('/#/hermes/chat')
+      await page.goto('/#/hermes/chat?studio=1')
       await page.getByRole('button', { name: 'New Chat', exact: true }).click()
       const draft = page.locator('.new-chat-page')
       const agent = draft.locator('.agent-card.active')
@@ -155,20 +155,20 @@ for (const entry of ['/hermes/chat', '/studio/agents']) {
     const api = await mockHermesApi(page)
     // There is no resumed payload for the new session, just as the server has no history yet.
     await mockChatSocket(page)
-    await page.goto(`/#${entry}`)
+    await page.goto(`/#${entry}${entry === "/hermes/chat" ? "?studio=1" : ""}`)
     if (entry !== '/hermes/chat') await page.getByRole('link', { name: 'Chat', exact: true }).click()
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
     const draft = page.locator('.new-chat-page')
     await sendNewChatMessage(page)
     await expect(page).toHaveURL(/#\/hermes\/session\//)
-    const sessionId = new URL(page.url()).hash.split('/').pop()!
+    const sessionId = new URL(page.url()).hash.split('?')[0].split('/').pop()!
     const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
     await expect(input).toBeVisible({ timeout: 2000 })
     await expect(page.locator('.chat-view > .page-loading-overlay')).toHaveCount(0)
     expect(await page.evaluate(sid => (window as any).__PW_CHAT_SOCKET__?.emitted
       ?.filter((item: any) => item.event === 'resume' && item.payload.session_id === sid) || [], sessionId)).toEqual([])
     await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted
-      ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({ session_id: sessionId, agent_id: 'ekko-agent' })
+      ?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({ session_id: sessionId, ...(entry === '/hermes/chat' ? { agent_id: 'ekko-agent' } : { source: 'cli' }) })
     expect(api.unexpectedRequests).toEqual([])
   })
 }
@@ -186,7 +186,7 @@ for (const agent of agentCatalog.agents) {
           id: item.id, installed: true, source: item.kind === 'built-in' ? 'built-in' : 'user-cli',
         })),
       } }))
-      await page.goto('/#/hermes/chat')
+      await page.goto('/#/hermes/chat?studio=1')
       await page.getByRole('button', { name: 'New Chat', exact: true }).click()
       const draft = page.locator('.new-chat-page')
       if (agent.id !== 'ekko-agent') {
@@ -195,7 +195,7 @@ for (const agent of agentCatalog.agents) {
       if (mode === 'global' && agent.modes.includes('scoped')) await selectNewChatLaunchMode(page, 'global')
       await sendNewChatMessage(page)
       await expect(page).toHaveURL(/#\/hermes\/session\//)
-      const sessionId = new URL(page.url()).hash.split('/').pop()!
+      const sessionId = new URL(page.url()).hash.split('?')[0].split('/').pop()!
       expect(await page.evaluate(sid => (window as any).__PW_CHAT_SOCKET__?.emitted
         ?.filter((item: any) => item.event === 'resume' && item.payload.session_id === sid) || [], sessionId)).toEqual([])
       const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
@@ -216,7 +216,7 @@ for (const failure of ['not-installed', 'unavailable']) {
     await authenticate(page, TEST_ACCESS_KEY, 'research')
     await mockHermesApi(page)
     await mockChatSocket(page)
-    await page.goto('/#/hermes/chat')
+    await page.goto('/#/hermes/chat?studio=1')
     await page.getByRole('button', { name: 'New Chat', exact: true }).click()
     const draft = page.locator('.new-chat-page')
     await selectNewChatAgent(page, 'Codex')
@@ -232,7 +232,7 @@ for (const failure of ['not-installed', 'unavailable']) {
       await expect(page.locator('.n-message')).toContainText('Failed to inspect coding agents')
       await expect(draft.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
       await expect(draft).toBeVisible()
-      await expect(page).toHaveURL(/#\/hermes\/chat$/)
+      await expect(page).toHaveURL(/#\/hermes\/chat(?:\?.*)?$/)
     } else {
       await expect(page.locator('.n-message')).toContainText('Codex')
       await expect(page).toHaveURL(/#\/studio\/agents$/)

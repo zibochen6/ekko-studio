@@ -39,8 +39,8 @@ beforeEach(async () => {
   vi.doMock('../../packages/server/src/modules/studio/services/voice/stt', async importOriginal => ({ ...await importOriginal<any>(), transcribeWithProvider: speechTranscribe }))
   processes.length = 0
   terminalService = undefined
-  vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({ getProfileDir: () => root, getActiveProfileDir: () => root, getActiveProfileName: () => 'default', listProfileNamesFromDisk: () => ['default'] }))
-  vi.doMock('../../packages/server/src/modules/hermes/services/profiles/profile', () => ({ getProfileDir: () => root, listProfileNamesFromDisk: () => ['default'] }))
+  vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({ usesProfileOnlyCredentials: () => false, getProfileDir: () => root, getActiveProfileDir: () => root, getActiveProfileName: () => 'default', listProfileNamesFromDisk: () => ['default'] }))
+  vi.doMock('../../packages/server/src/modules/hermes/services/profiles/profile', () => ({ usesProfileOnlyCredentials: () => false, getProfileDir: () => root, listProfileNamesFromDisk: () => ['default'] }))
   vi.doMock('../../packages/server/src/modules/hermes/services/terminal/runtime', () => ({
     canOpenTerminal: (user: any) => user?.role === 'super_admin', findShell: () => '/bin/sh', resolveTerminalCwd: () => root,
     pty: { spawn: () => { const process = { pid: 99999999, onData: vi.fn(), onExit: vi.fn(), kill: vi.fn(), write: vi.fn(), resize: vi.fn() }; processes.push(process); return process } },

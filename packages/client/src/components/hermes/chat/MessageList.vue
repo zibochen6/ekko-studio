@@ -23,6 +23,9 @@ import ToolRunCard from "./ToolRunCard.vue";
 import MessageQueueFloatPanel from "./MessageQueueFloatPanel.vue";
 import PendingInteractionCountdown from "./PendingInteractionCountdown.vue";
 import { LIVE_CHAT_MAX_LOADED_MESSAGES, parseMessageReference, useChatStore, type Message } from "@/stores/hermes/chat";
+import { useAccountStore } from '@/stores/account';
+import { botAvatarSource, botDisplayName } from '@/utils/bot-workspace';
+import { isHermesSession } from '@/utils/hermes/session-agent';
 import { useProfilesStore } from "@/stores/hermes/profiles";
 import { useToolTraceVisibility } from "@/composables/useToolTraceVisibility";
 import { openSubagentStream, subagentIdFromToolCall } from "@/utils/hermes/subagent-stream";
@@ -41,6 +44,8 @@ const props = withDefaults(defineProps<{
 
 const chatStore = useChatStore();
 const profilesStore = useProfilesStore();
+const accountStore = useAccountStore();
+onMounted(() => { void accountStore.loadAccount(); });
 const { t } = useI18n();
 const { toolTraceVisible } = useToolTraceVisibility();
 const listRef = ref<InstanceType<typeof VirtualMessageList> | null>(null);
@@ -183,7 +188,13 @@ const liveReasoningDetail = computed<{
   return null;
 });
 
-const assistantAgent = computed(() => chatSessionAgentAvatar(chatStore.activeSession));
+const assistantAgent = computed(() => {
+  if (isHermesSession(chatStore.activeSession) && activeSessionProfile.value) return {
+    label: botDisplayName(activeSessionProfile.value),
+    src: botAvatarSource(activeSessionProfileName.value, activeSessionProfile.value.avatar),
+  };
+  return chatSessionAgentAvatar(chatStore.activeSession);
+});
 const activeSessionProfileName = computed(() => (
   chatStore.activeSession?.profile || profilesStore.activeProfileName || "default"
 ));
@@ -191,9 +202,9 @@ const activeSessionProfile = computed(() => (
   profilesStore.profiles.find(profile => profile.name === activeSessionProfileName.value) || null
 ));
 const userProfileName = computed(() => (
-  activeSessionProfile.value?.alias?.trim() || activeSessionProfileName.value
+  accountStore.username || t("botWorkspace.you")
 ));
-const userProfileAvatar = computed(() => activeSessionProfile.value?.avatar || null);
+const userProfileAvatar = computed(() => accountStore.profileAvatar || null);
 
 const emptyState = computed(() => {
   const agent = assistantAgent.value;

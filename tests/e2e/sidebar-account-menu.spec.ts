@@ -56,7 +56,8 @@ test('opens account controls from chat without navigating and keeps nested dialo
   await expect(page.locator('.changelog-list')).toBeVisible()
   await page.keyboard.press('Escape')
 
-  await page.locator('.studio-navigation-rail').getByRole('link', { name: 'Settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Studio tools', exact: true }).click()
+  await page.locator('.n-dropdown-option-body').filter({ hasText: /^Settings$/ }).click()
   await expect(page).toHaveURL(/#\/hermes\/settings$/)
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
   await expect(menu).not.toBeVisible()

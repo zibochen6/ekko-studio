@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { NDrawer } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import BotSidebar from '@/components/hermes/workspace/BotSidebar.vue'
 import StudioNavigationRail from './StudioNavigationRail.vue'
 
-defineProps<{ show: boolean; hasSidebar: boolean }>()
+defineProps<{ show: boolean; hasSidebar: boolean; botWorkspace?: boolean }>()
 const emit = defineEmits<{
   'update:show': [show: boolean]
   target: [element: HTMLElement | null]
@@ -21,7 +22,8 @@ const { t } = useI18n()
     @update:show="emit('update:show', $event)"
   >
     <div class="studio-mobile-navigation">
-      <StudioNavigationRail />
+      <BotSidebar v-if="botWorkspace" />
+      <StudioNavigationRail v-else />
       <section v-show="hasSidebar" class="studio-mobile-navigation__panel">
         <button class="studio-mobile-navigation__close" type="button" :aria-label="t('common.close')" @click="emit('update:show', false)">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12" /></svg>
@@ -111,4 +113,17 @@ const { t } = useI18n()
   :deep(.ekko-config-collapse),
   :deep(.coding-agent-config-collapse) { display: none; }
 }
+</style>
+
+<style scoped lang="scss">
+.studio-mobile-navigation :deep(.bot-sidebar) { width: 72px; flex-basis: 72px; padding: 16px 8px 8px; }
+.studio-mobile-navigation :deep(.bot-sidebar__brand) { justify-content: center; }
+.studio-mobile-navigation :deep(.bot-sidebar__brand > span),
+.studio-mobile-navigation :deep(.roster-toggle),
+.studio-mobile-navigation :deep(.bot-sidebar__eyebrow),
+.studio-mobile-navigation :deep(.bot-row__copy),
+.studio-mobile-navigation :deep(.bot-row__edit),
+.studio-mobile-navigation :deep(.bot-create > span:last-child),
+.studio-mobile-navigation :deep(.bot-tools > span) { display: none; }
+.studio-mobile-navigation :deep(.bot-create), .studio-mobile-navigation :deep(.bot-tools) { justify-content: center; padding-inline: 8px; }
 </style>

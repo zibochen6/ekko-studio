@@ -34,7 +34,7 @@ test('Antigravity picker offers scoped provider selection and global config', as
       { id: 'antigravity', installed: true, source: 'user-cli' },
     ],
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const draft = page.locator('.new-chat-page')
   await selectNewChatAgent(page, 'Antigravity')
@@ -76,7 +76,7 @@ for (const mode of ['global', 'scoped']) {
     await page.keyboard.press('Control+k')
     await page.locator('.session-search-modal input').fill('Antigravity')
     await page.locator('.session-search-modal .result-item').filter({ hasText: session.title }).click()
-    await expect(page).toHaveURL(new RegExp(`/hermes/session/${session.id}$`))
+    await expect(page).toHaveURL(new RegExp(`/hermes/session/${session.id}(?:\\?.*)?$`))
     await expect(page.getByText('Previous agy answer', { exact: true })).toBeVisible()
     await page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)').fill('Continue this conversation')
     await page.getByRole('button', { name: 'Send', exact: true }).click()

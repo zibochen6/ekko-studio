@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, onScopeDispose } from 'vue'
+import { onAuthInvalidated } from '@/api/auth-invalidation'
+import { getActiveProfileName } from '@/api/client'
 import * as configApi from '@/api/hermes/config'
 import type { DisplayConfig, AgentConfig, MemoryConfig, SkillsConfig, CompressionConfig, SessionResetConfig, PrivacyConfig, ApprovalConfig, GatewayAutoStartConfig, ProxyConfig } from '@/api/hermes/config'
 
@@ -67,10 +69,16 @@ export const useSettingsStore = defineStore('settings', () => {
   const platforms = ref<Record<string, any>>({})
   const platformCredentialStatus = ref<Record<string, boolean>>({})
 
-  async function fetchSettings(options?: { shouldCommit?: () => boolean }) {
+  let settingsRequestSequence = 0
+  const unsubscribeAuth = onAuthInvalidated(() => { settingsRequestSequence++; loading.value = false })
+  onScopeDispose(unsubscribeAuth)
+  async function fetchSettings(options?: { shouldCommit?: () => boolean; profile?: string }) {
+    const sequence = ++settingsRequestSequence
+    const profile = options?.profile || getActiveProfileName() || 'default'
     loading.value = true
     try {
-      const data = await configApi.fetchConfig()
+      const data = await configApi.fetchConfig(undefined, profile)
+      if (sequence !== settingsRequestSequence || (getActiveProfileName() || 'default') !== profile) return false
       if (options?.shouldCommit && !options.shouldCommit()) return false
       display.value = data.display || {}
       agent.value = data.agent || {}
@@ -99,7 +107,7 @@ export const useSettingsStore = defineStore('settings', () => {
       console.error('Failed to fetch settings:', err)
       return false
     } finally {
-      loading.value = false
+      if (sequence === settingsRequestSequence) loading.value = false
     }
   }
 
@@ -138,9 +146,11 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function saveSection(section: string, values: Record<string, any>, options?: { restart?: boolean }) {
+    const profile = getActiveProfileName() || 'default'
     saving.value = true
     try {
       await configApi.updateConfigSection(section, values, options)
+      if ((getActiveProfileName() || 'default') !== profile) return
     switch (section) {
       case 'display': display.value = { ...display.value, ...values }; break
       case 'agent': agent.value = { ...agent.value, ...values }; break

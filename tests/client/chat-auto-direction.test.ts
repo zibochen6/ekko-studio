@@ -41,7 +41,7 @@ describe('chat text direction follows the conversation, not the interface', () =
   // either one drags in the whole chat surface.
   it('marks the session title in the chat header', () => {
     const source = chatPanelSource
-    expect(source).toContain('<span class="header-session-title" dir="auto">{{ headerTitle }}</span>')
+    expect(source).toContain('<span v-else class="header-session-title" dir="auto">{{ headerTitle }}</span>')
   })
 
   it('marks the title and snippet of a search result', () => {

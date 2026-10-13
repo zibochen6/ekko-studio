@@ -927,6 +927,7 @@ describe('chat store reasoning/tool boundaries', () => {
       'deepseek-v4-pro',
       'deepseek',
       'chat_completions',
+      'default',
     )
     expect(session.provider).toBe('deepseek')
     expect(session.model).toBe('deepseek-v4-pro')
@@ -990,6 +991,7 @@ describe('chat store reasoning/tool boundaries', () => {
       'gpt-5.5',
       'fun-codex',
       'chat_completions',
+      'default',
     )
     expect(session.apiMode).toBe('chat_completions')
   })

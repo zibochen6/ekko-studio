@@ -11,6 +11,13 @@ const form: NewChatFormPreferences = {
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.restoreAllMocks() })
 
 describe('new-chat form preferences', () => {
+  it('keeps Bot model and working-directory drafts independent from each other and the legacy launcher', () => {
+    saveNewChatFormPreferences(301, form, 'research')
+    saveNewChatFormPreferences(301, { ...form, profile: 'writer', workspace: '/writing', model: 'writer-model' }, 'writer')
+    expect(loadNewChatFormPreferences(301, 'research')).toMatchObject({ profile: 'research', workspace: '/workspace/project', model: 'chosen-model' })
+    expect(loadNewChatFormPreferences(301, 'writer')).toMatchObject({ profile: 'writer', workspace: '/writing', model: 'writer-model' })
+    expect(loadNewChatFormPreferences(301)).toBeNull()
+  })
   it('remembers native model and effort choices separately for each agent and scoped provider', () => {
     const nativeModels = { codex: { model: 'native-codex', reasoningEffort: 'high' }, pi: { model: 'provider/native-pi', reasoningEffort: 'low' },
       dsh: { model: '["native","model"]', reasoningEffort: 'off' } }

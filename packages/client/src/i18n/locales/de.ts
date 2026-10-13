@@ -1,6 +1,75 @@
 import { socialMessagesDe } from '../social-messages-locales'
 
 export default {
+  botWorkspace: {
+    workingDirectory: 'Arbeitsverzeichnis',
+    "bots": "Assistenten",
+    "personalWorkspace": "PERSÖNLICHER ARBEITSBEREICH",
+    "expandBots": "Expand Bot sidebar",
+    "collapseBots": "Collapse Bot sidebar",
+    "createBot": "Neuer Bot",
+    "editBot": "Bot bearbeiten",
+    "botActions": "Actions for {name}",
+    "displayName": "Anzeigename",
+    "description": "Beschreibung",
+    "namePlaceholder": "Give your Bot a name",
+    "descriptionPlaceholder": "What would you like this assistant to help with?",
+    "descriptionHint": "A short introduction for display. Edit SOUL.md to change behavior.",
+    "internalId": "Internal Profile ID",
+    "internalIdHint": "This stable identifier connects configuration and history. Changing the display name keeps it unchanged.",
+    "uploadAvatar": "Avatar hochladen",
+    "restoreAvatar": "Standard wiederherstellen",
+    "avatarHint": "PNG, JPG or WebP · up to 1 MB",
+    "connectionSource": "Use a model connection from",
+    "modelConnection": "Model connection",
+    "connectLater": "Connect a model later",
+    "connectionLoadFailed": "Could not load model connections",
+    "createHint": "A fresh Bot with independent settings, memory and history. Only the selected model connection is copied; personality, skills and tasks stay separate.",
+    "saved": "Bot gespeichert",
+    "saveFailed": "Could not save Bot",
+    "configuration": "Konfiguration",
+    "configIntro": "{name} has an independent Profile. These files control its behavior; your introduction is only a display label.",
+    "workspaceHint": "The working directory belongs to each conversation. Project instructions such as AGENTS.md and HERMES.md are read from that directory.",
+    "studioTools": "Studio-Werkzeuge",
+    "otherAgents": "Ekko & coding agents",
+    "waiting": "Bestätigung erforderlich",
+    "working": "In Arbeit",
+    "completed": "Neues Ergebnis",
+    "ready": "Bereit",
+    "personalAssistant": "Your personal AI assistant",
+    "conversations": "Gespräche",
+    "searchConversations": "Gespräche durchsuchen",
+    "tasks": "Aktivität",
+    "greeting": "What shall we work on, {name}?",
+    "startConversation": "A space for your ideas, questions and everyday work.",
+    "you": "Du",
+    "files": {
+        "config": {
+            "title": "Model and runtime settings",
+            "description": "Model, tools and runtime preferences. Opens the existing configuration editor."
+        },
+        "credentials": {
+            "title": "Model credentials",
+            "description": "API keys and OAuth credentials. Manage these through model settings to keep secrets protected."
+        },
+        "soul": {
+            "title": "Personality and instructions",
+            "description": "The instructions that shape this Bot’s behavior. Your display introduction does not change this file."
+        },
+        "memory": {
+            "title": "Long-term memory",
+            "description": "This Bot’s accumulated knowledge and preferences, isolated from other Profiles."
+        },
+        "skills": {
+            "title": "Skills",
+            "description": "Reusable capabilities available to this Bot. Opens the existing skills manager."
+        },
+        "cron": {
+            "title": "Scheduled tasks",
+            "description": "Scheduled work for this Profile. Opens the existing task manager."
+        }
+    }
+},
   jev: {
     browserAutomation: "Automatisierung des integrierten Browsers",
     browserAutomationHint: "Optionale Bewertungen verwenden die gespeicherte JEV-Verbindung dieses Profils ab der nächsten Bewertung. Sichtbare Beschriftungen werden an JEV gesendet, Eingabewerte nicht. Bei deaktivierter, nicht verfügbarer oder unsicherer Bewertung bleibt der bisherige Ablauf erhalten.",

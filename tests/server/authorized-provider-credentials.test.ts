@@ -7,9 +7,11 @@ import {
   isAuthorizedRuntimeProvider,
   resolveAuthorizedProviderRuntimeCredentials,
 } from '../../packages/server/src/modules/hermes/services/providers/authorized-provider-credentials'
+import { saveProfileIdentity } from '../../packages/server/src/modules/hermes/services/profiles/identity'
 
 const NOW = Date.parse('2026-08-27T08:00:00.000Z')
 let hermesHome = ''
+const originalWebUiHome = process.env.HERMES_WEB_UI_HOME
 
 function jwt(exp: number, scope?: string): string {
   const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url')
@@ -39,11 +41,13 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
 describe('Studio authorized provider runtime credentials', () => {
   beforeEach(() => {
     hermesHome = mkdtempSync(join(tmpdir(), 'studio-provider-auth-'))
+    process.env.HERMES_WEB_UI_HOME = join(hermesHome, 'webui')
   })
 
   afterEach(() => {
     if (hermesHome) rmSync(hermesHome, { recursive: true, force: true })
     hermesHome = ''
+    process.env.HERMES_WEB_UI_HOME = originalWebUiHome
   })
 
   it('reads a fresh profile-scoped token directly from Hermes auth.json', async () => {
@@ -73,6 +77,29 @@ describe('Studio authorized provider runtime credentials', () => {
       apiMode: 'codex_responses',
       lastRefresh: new Date(NOW).toISOString(),
     })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('does not use or refresh default Profile authorization for an unconfigured Bot', async () => {
+    await saveProfileIdentity('empty-bot', {}, { profileOnlyCredentials: true })
+    const path = writeAuth({ providers: { 'xai-oauth': { access_token: 'default-token', refresh_token: 'default-refresh' } } })
+    const original = readFileSync(path, 'utf8')
+    const fetcher = vi.fn<typeof fetch>()
+    await expect(resolveAuthorizedProviderRuntimeCredentials({
+      profile: 'empty-bot', provider: 'xai-oauth',
+    }, { profileDir, now: () => NOW, fetch: fetcher })).rejects.toBeInstanceOf(AuthorizedProviderCredentialError)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(readFileSync(path, 'utf8')).toBe(original)
+  })
+
+  it('preserves existing Profiles that deliberately share the default OAuth connection', async () => {
+    const accessToken = jwt(Math.floor((NOW + 6 * 60 * 60 * 1000) / 1000))
+    writeAuth({ providers: { 'xai-oauth': { access_token: accessToken } } })
+    await saveProfileIdentity('legacy-profile', { displayName: '旧助手' })
+    const fetcher = vi.fn<typeof fetch>()
+    await expect(resolveAuthorizedProviderRuntimeCredentials({ profile: 'legacy-profile', provider: 'xai-oauth' }, {
+      profileDir, now: () => NOW, fetch: fetcher,
+    })).resolves.toMatchObject({ apiKey: accessToken })
     expect(fetcher).not.toHaveBeenCalled()
   })
 
@@ -374,6 +401,24 @@ describe('Studio authorized provider runtime credentials', () => {
     const saved = JSON.parse(readFileSync(qwenPath, 'utf-8'))
     expect(saved.refresh_token).toBe('rotated-qwen-token')
     expect(saved.expiry_date).toBe(NOW + 3600 * 1000)
+  })
+
+  it('keeps non-default Qwen credentials and refreshes inside the selected Profile', async () => {
+    await saveProfileIdentity('research', {}, { profileOnlyCredentials: true })
+    const globalPath = join(hermesHome, 'shared-qwen.json')
+    writeFileSync(globalPath, JSON.stringify({ access_token: 'global-qwen', expiry_date: NOW + 3600000 }))
+    const fetcher = vi.fn<typeof fetch>()
+    await expect(resolveAuthorizedProviderRuntimeCredentials({ profile: 'research', provider: 'qwen-oauth' }, {
+      profileDir, qwenAuthPath: () => globalPath, now: () => NOW, fetch: fetcher,
+    })).rejects.toBeInstanceOf(AuthorizedProviderCredentialError)
+    const localDir = join(profileDir('research'), '.qwen')
+    mkdirSync(localDir, { recursive: true })
+    writeFileSync(join(localDir, 'oauth_creds.json'), JSON.stringify({ access_token: 'research-qwen', expiry_date: NOW + 3600000 }))
+    await expect(resolveAuthorizedProviderRuntimeCredentials({ profile: 'research', provider: 'qwen-oauth' }, {
+      profileDir, qwenAuthPath: () => globalPath, now: () => NOW, fetch: fetcher,
+    })).resolves.toMatchObject({ apiKey: 'research-qwen' })
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(JSON.parse(readFileSync(globalPath, 'utf8')).access_token).toBe('global-qwen')
   })
 
   it('rejects providers outside the Hermes authorization store before reading credentials', async () => {

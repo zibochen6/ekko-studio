@@ -29,14 +29,16 @@ export async function pollCopilotLogin(sessionId: string): Promise<CopilotPollRe
   return request<CopilotPollResult>(`/api/hermes/auth/copilot/poll/${sessionId}`)
 }
 
-export async function checkCopilotToken(): Promise<CopilotCheckTokenResult> {
-  return request<CopilotCheckTokenResult>('/api/hermes/auth/copilot/check-token')
+export async function checkCopilotToken(profile?: string): Promise<CopilotCheckTokenResult> {
+  return request<CopilotCheckTokenResult>('/api/hermes/auth/copilot/check-token', profile ? { headers: { 'X-Hermes-Profile': profile } } : {})
 }
 
 export async function enableCopilot(): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>('/api/hermes/auth/copilot/enable', { method: 'POST' })
 }
 
-export async function disableCopilot(): Promise<{ ok: boolean; cleared_env: boolean; cleared_default?: boolean }> {
-  return request<{ ok: boolean; cleared_env: boolean; cleared_default?: boolean }>('/api/hermes/auth/copilot/disable', { method: 'POST' })
+export async function disableCopilot(profile?: string): Promise<{ ok: boolean; cleared_env: boolean; cleared_default?: boolean }> {
+  return request<{ ok: boolean; cleared_env: boolean; cleared_default?: boolean }>('/api/hermes/auth/copilot/disable', {
+    method: 'POST', ...(profile ? { headers: { 'X-Hermes-Profile': profile } } : {}),
+  })
 }

@@ -36,7 +36,7 @@ import { getSystemPrompt } from '../public/runs/prompt'
 import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
-import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../public/profile-config'
+import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk, readConfigYamlForProfile, usesProfileOnlyCredentials } from '../public/profile-config'
 import {
   getChatCodingAgentMcpServers,
   resolveChatEkkoMcpServers,
@@ -825,9 +825,19 @@ export class ChatRunSocket {
       event: 'session.activity.snapshot',
       profile: currentProfile(),
       sessions: Array.from(this.sessionMap.entries()).flatMap(([sessionId, state]) => {
-        if (!state.isWorking || (shared && sessionId !== shared.share.session_id)) return []
+        if ((!state.isWorking && this.backgroundPendingCount(state) === 0) || (shared && sessionId !== shared.share.session_id)) return []
         const profile = state.profile || getSession(sessionId)?.profile || 'default'
-        return profile === currentProfile() ? [{ session_id: sessionId, status: 'running' }] : []
+        if (profile !== currentProfile()) return []
+        const pending = new Set<string>()
+        for (const { event, data } of buildResumeEvents(state.events || [])) {
+          if (!['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)) continue
+          const id = data?.approval_id || data?.clarify_id
+          if (!id) continue
+          const key = `${event.split('.')[0]}:${id}`
+          if (event.endsWith('.requested') && data.remaining_timeout_ms !== 0) pending.add(key)
+          else if (!data.stale && (data.resolved !== false || ['timeout', 'aborted', 'cancelled', 'canceled'].includes(data.reason))) pending.delete(key)
+        }
+        return [{ session_id: sessionId, status: 'running', ...(pending.size ? { pending: true } : {}) }]
       }),
       timestamp: Date.now(),
     })
@@ -837,27 +847,21 @@ export class ChatRunSocket {
     }
     const resolveRunProfile = (sessionId?: string, requested?: string) => {
       const requestedProfile = typeof requested === 'string' ? requested.trim() : ''
-      if (requestedProfile) {
-        if (!profileExists(requestedProfile)) throw new Error(`Profile "${requestedProfile}" does not exist`)
-        if (socketUser && !this.canAccessProfile(socketUser, requestedProfile)) {
-          throw new Error(`Profile "${requestedProfile}" is not available for this user`)
-        }
-        return requestedProfile
+      const storedSession = sessionId ? getSession(sessionId) : undefined
+      const storedProfile = storedSession
+        ? String(storedSession.profile || '').trim() || 'default'
+        : sessionId ? this.sessionMap.get(sessionId)?.profile : undefined
+      const profile = requestedProfile || storedProfile || currentProfile()
+      if (profile !== currentProfile() || (storedProfile && storedProfile !== profile)) {
+        throw new Error('Session profile does not match this connection')
       }
-      if (!sessionId) {
-        const profile = currentProfile()
-        if (socketUser && !this.canAccessProfile(socketUser, profile)) {
-          throw new Error(`Profile "${profile}" is not available for this user`)
-        }
-        return profile
-      }
-      const storedProfile = getSession(sessionId)?.profile || ''
-      const profile = storedProfile && profileExists(storedProfile) ? storedProfile : currentProfile()
+      if (!profileExists(profile)) throw new Error(`Profile "${profile}" does not exist`)
       if (socketUser && !this.canAccessProfile(socketUser, profile)) {
         throw new Error(`Profile "${profile}" is not available for this user`)
       }
       return profile
     }
+
     const requireSocketSessionAccess = (sessionId: string) => {
       const session = getSession(sessionId)
       if (!session) throw new Error('Session not found')
@@ -944,6 +948,14 @@ export class ChatRunSocket {
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
         normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
+        const existingSession = data.session_id ? getSession(data.session_id) : undefined
+        if (!data.model && !existingSession?.model && !isEkkoAgentExecution(data)
+          && !data.coding_agent_id && isBridgeRunSource(resolveRunSource(data.source, data.session_id))
+          && !parseSessionCommand(data.input) && usesProfileOnlyCredentials(runProfile)) {
+          const ownConfig = await readConfigYamlForProfile(runProfile)
+          const configuredModel = typeof ownConfig.model === 'string' ? ownConfig.model : ownConfig.model?.default
+          if (!configuredModel) throw new Error('Configure a model connection for this Bot before sending a message')
+        }
         if (!shared && data.session_id && Array.isArray(data.input)) {
           // New chats carry a client-generated id; the runtime persists them on the first run.
           if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id)
@@ -3132,6 +3144,16 @@ export class ChatRunSocket {
     const sessionId = typeof payload?.session_id === 'string' ? payload.session_id : ''
     if (!sessionId) return
 
+    if (event === 'delegation.updated' && payload.background_pending != null) {
+      const state = this.sessionMap.get(sessionId)
+      this.nsp.to([`pending-interactions:${profile}`, `session:${sessionId}`]).emit('session.activity', {
+        event: 'session.activity', session_id: sessionId,
+        status: state?.isWorking || Number(payload.background_pending) > 0 ? 'running' : 'completed',
+        timestamp: Date.now(),
+      })
+      return
+    }
+
     let status: 'running' | 'completed' | 'failed' | null = null
     if (event === 'run.started' || (event === 'session.command' && payload.started === true && payload.terminal !== true)) {
       status = 'running'
@@ -3157,7 +3179,7 @@ export class ChatRunSocket {
     this.nsp.to([`pending-interactions:${profile}`, `session:${sessionId}`]).emit('session.activity', {
       event: 'session.activity',
       session_id: sessionId,
-      status,
+      status: Number(payload.background_pending ?? (state ? this.backgroundPendingCount(state) : 0)) > 0 ? 'running' : status,
       timestamp: Date.now(),
     })
   }

@@ -170,6 +170,8 @@ function mountCard(group: AvailableModelGroup) {
 describe('ProviderCard built-in destructive action labels', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
+    localStorage.removeItem('hermes_active_profile_name')
     modelsStoreMock.fetchProviders.mockResolvedValue(undefined)
     modelsStoreMock.setDefaultModel.mockResolvedValue(undefined)
     modelsStoreMock.setDefaultProvider.mockResolvedValue(undefined)
@@ -288,6 +290,20 @@ describe('ProviderCard built-in destructive action labels', () => {
 
     expect(copilotAuthMock.disableCopilot).toHaveBeenCalled()
     expect(messageMock.success).toHaveBeenCalledWith('Provider disabled')
+  })
+
+  it('keeps Copilot removal scoped to its original Bot after changing the selection', async () => {
+    sessionStorage.setItem('hermes_active_profile_name', 'research')
+    const wrapper = mountCard(provider({ provider: 'copilot', label: 'GitHub Copilot', builtin: true, api_key: '' }))
+    await wrapper.findAll('button').find(button => button.text() === 'Disable provider')!.trigger('click')
+    expect(copilotAuthMock.checkCopilotToken).toHaveBeenCalledWith('research')
+    sessionStorage.setItem('hermes_active_profile_name', 'writer')
+    await dialogMock.warning.mock.calls[0][0].onPositiveClick()
+    expect(copilotAuthMock.disableCopilot).toHaveBeenCalledWith('research')
+    expect(chatStoreMock.clearProviderFromSessions).toHaveBeenCalledWith('copilot', 'research')
+    expect(modelsStoreMock.fetchProviders).not.toHaveBeenCalled()
+    expect(appStoreMock.switchModel).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('exposes an explicit set-default-provider action on non-default providers', async () => {

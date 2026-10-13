@@ -34,7 +34,11 @@ import { naiveRtlFor } from "@/constants/naiveRtl";
 import { navigationRailKey } from "@/composables/useNavigationRail";
 import { pageHeaderTargetKey } from "@/composables/usePageHeader";
 import { mobileNavigationKey } from "@/composables/usePageSidebar";
+import { isBotWorkspaceRoute, botRosterCollapsed } from '@/utils/bot-workspace';
 import HeaderSidebarToggle from "@/components/layout/HeaderSidebarToggle.vue";
+
+const BotSidebar = defineAsyncComponent(async () => (await import('@/components/hermes/workspace/BotSidebar.vue')).default);
+const botWorkspace = computed(() => isBotWorkspaceRoute(route));
 
 const StudioNavigationRail = defineAsyncComponent(
   async () => (await import("@/components/layout/StudioNavigationRail.vue")).default,
@@ -311,6 +315,8 @@ useKeyboard();
                 'desktop-window-maximized': isDesktopWindowMaximized,
                 'app-shell--custom-background': hasBackgroundImage,
                 'app-shell--navigation-rail': showNavigationRail,
+                'app-shell--bot-workspace': botWorkspace && showNavigationRail,
+                'app-shell--bot-roster-collapsed': botRosterCollapsed,
               },
             ]"
           >
@@ -319,11 +325,13 @@ useKeyboard();
               :standalone="isLoginPage || isDesktopChatWindow"
               :left-offset="desktopTitleBarLeft"
             />
-            <StudioNavigationRail v-if="showNavigationRail" />
+            <BotSidebar v-if="showNavigationRail && botWorkspace" />
+            <StudioNavigationRail v-else-if="showNavigationRail" />
             <MobileNavigationDrawer
               v-if="hasNavigationRail && !isWideViewport"
               v-model:show="mobileNavigationOpen"
               :has-sidebar="hasMobileContextSidebar"
+              :bot-workspace="botWorkspace"
               @target="mobileSidebarHost = $event"
             />
             <div
@@ -406,7 +414,7 @@ useKeyboard();
             v-if="!isDesktopPetRoute && !isStandaloneChatPage"
           />
           <ProviderConfigurationPrompt
-            v-if="!isDesktopPetRoute && !isStandaloneChatPage"
+            v-if="!isDesktopPetRoute && !isStandaloneChatPage && !botWorkspace"
           />
           <GlobalPendingActions
             v-if="!isLoginPage && !isDesktopPetRoute && !isStandaloneChatPage"
@@ -938,5 +946,19 @@ useKeyboard();
   border-bottom: 1px solid #fde68a;
   text-align: center;
   line-height: 1.4;
+}
+</style>
+
+<style scoped lang="scss">
+.app-shell--bot-workspace {
+  --studio-header-inset: 200px;
+  --studio-header-height: 64px;
+  --studio-content-gutter: 0px;
+  --studio-content-radius: 0px;
+  &.app-shell--bot-roster-collapsed { --studio-header-inset: 72px; }
+  .studio-page-header { background: var(--bg-card); box-shadow: inset 0 -1px 0 var(--border-color); }
+  .studio-page-header :deep(.header-sidebar-control--outer:not(.header-sidebar-control--collapsed)) { flex-basis: 248px; }
+  .studio-page-header :deep(.header-left) { gap: 12px; }
+  .studio-page-header :deep(.header-session-title) { font-size: 14px; }
 }
 </style>

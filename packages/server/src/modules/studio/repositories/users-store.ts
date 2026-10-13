@@ -126,6 +126,20 @@ export function userCanAccessProfile(userId: UserId, profileName: string): boole
   return !!row
 }
 
+/** Add one owned Profile without replacing concurrent grants or the existing default. */
+export function grantUserProfile(userId: UserId, profileName: string): boolean {
+  const db = getDb()
+  const id = normalizeUserId(userId)
+  if (!db || !id || !profileName.trim()) return false
+  const name = profileName.trim()
+  db.prepare(
+    `INSERT OR IGNORE INTO ${USER_PROFILES_TABLE} (user_id, profile_name, is_default, created_at)
+     SELECT id, ?, CASE WHEN EXISTS (SELECT 1 FROM ${USER_PROFILES_TABLE} WHERE user_id = ? AND is_default = 1) THEN 0 ELSE 1 END, ?
+     FROM ${USERS_TABLE} WHERE id = ? AND status = 'active'`
+  ).run(name, id, Date.now(), id)
+  return findUserById(id)?.status === 'active' && userCanAccessProfile(id, name)
+}
+
 export function getDefaultProfileForUser(userId: UserId): string {
   const db = getDb()
   if (!db) return DEFAULT_PROFILE_NAME

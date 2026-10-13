@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { agentMetadata, isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
+import BotIdentityDrawer from '@/components/hermes/workspace/BotIdentityDrawer.vue'
+import BotConfigDrawer from '@/components/hermes/workspace/BotConfigDrawer.vue'
+import { botDisplayName } from '@/utils/bot-workspace'
+import DesktopUpdateDownloadTab from '@/components/layout/DesktopUpdateDownloadTab.vue'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { usePageLoadingTask } from '@/composables/usePageLoading'
@@ -83,11 +88,13 @@ import {
 
 const props = withDefaults(defineProps<{
   standalone?: boolean;
+  botWorkspace?: boolean;
   contentMode?: "chat" | "connections" | "agents" | "models";
   initialComposerText?: string;
   composerPersistDraft?: boolean;
 }>(), {
   standalone: false,
+  botWorkspace: false,
   contentMode: "chat",
   initialComposerText: "",
   composerPersistDraft: true,
@@ -157,6 +164,20 @@ const TOOL_PANEL_STORAGE_KEY = "hermes.chat.toolPanelWidth";
 const toolPanelWidth = ref(loadToolPanelWidth());
 const toolResizeStart = ref<{ x: number; width: number; deltaSign: 1 | -1 } | null>(null);
 
+const currentBot = computed(() => profilesStore.profiles.find(profile => profile.name === profilesStore.activeProfileName) || null);
+const currentBotName = computed(() => botDisplayName(currentBot.value));
+const showBotIdentity = ref(false);
+const showBotConfig = ref(false);
+const botSessionSearch = ref("");
+const botTasksOnly = ref(false);
+const visibleSessions = computed(() => chatStore.sessions.filter(session => {
+  if (props.botWorkspace && (session.profile || 'default') !== profilesStore.activeProfileName) return false;
+  if (!props.botWorkspace && sessionProfileFilter.value && (session.profile || 'default') !== sessionProfileFilter.value) return false;
+  if (chatStore.isSessionListed && !chatStore.isSessionListed(session.id, props.botWorkspace ? profilesStore.activeProfileName : sessionProfileFilter.value)) return false;
+  if (props.botWorkspace && botTasksOnly.value && !chatStore.isSessionWorking(session.id) && !chatStore.isSessionCompletedUnread(session.id)) return false;
+  return !props.botWorkspace || !botSessionSearch.value.trim() || session.title.toLocaleLowerCase().includes(botSessionSearch.value.trim().toLocaleLowerCase());
+}));
+
 const currentMode = ref<"chat" | "live">("chat");
 
 // Batch selection mode
@@ -175,6 +196,18 @@ const toolPanelStyle = computed(() => ({
   width: isMobile.value ? "100%" : `min(${toolPanelWidth.value}px, 100%)`,
 }));
 
+watch(() => profilesStore.activeProfileName, (profile, previous) => {
+  if (!props.botWorkspace) return;
+  if (profile !== previous) closeNewChatPage();
+  if (previous) sessionStorage.setItem(`studio_bot_view:${previous}`, JSON.stringify({ search: botSessionSearch.value, tasks: botTasksOnly.value, sessions: showSessions.value }));
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`studio_bot_view:${profile}`) || '{}');
+    botSessionSearch.value = typeof saved.search === 'string' ? saved.search : '';
+    botTasksOnly.value = saved.tasks === true;
+    if (!isMobile.value) showSessions.value = saved.sessions !== false;
+  } catch { botSessionSearch.value = ''; botTasksOnly.value = false; }
+});
+
 function openRealtimeVoice() {
   if (!chatStore.activeSessionId) return;
   showRealtimeVoice.value = true;
@@ -188,7 +221,7 @@ function sessionHref(sessionId: string, profile?: string | null) {
   return router.resolve({
     name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
     params: { sessionId },
-    query: profile ? { profile } : undefined,
+    query: { ...(profile || props.botWorkspace ? { profile: profile || profilesStore.activeProfileName || undefined } : {}), ...(props.botWorkspace ? {} : { studio: "1" }) },
   }).href;
 }
 
@@ -351,6 +384,7 @@ function handleWorkspaceFileAttach(file: File) {
 
 async function submitBrowserAnnotations(payload: BrowserAnnotationSubmission): Promise<boolean> {
   const attachment = createBrowserAnnotationAttachment(payload);
+  if (showNewChatPage.value) return submitNewChat("", [attachment]);
   await chatStore.sendMessage("", [attachment]);
   return true;
 }
@@ -368,6 +402,7 @@ async function handleSessionClick(
   await router.push({
     name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
     params: { sessionId },
+    query: { profile: sessionProfile(sessionId) || undefined, ...(router.currentRoute.value.query.studio === "1" ? { studio: "1" } : {}) },
   });
   if (chatStore.activeSessionId !== sessionId) {
     await chatStore.switchSession(sessionId);
@@ -679,7 +714,7 @@ function sortSessionsForSidebar(items: Session[]): Session[] {
 }
 
 const recentSessionPartition = computed(() => partitionRecentSessions(
-  chatStore.sessions.filter((session) => !session.isPinned),
+  visibleSessions.value.filter((session) => !session.isPinned),
   sessionBrowserPrefsStore.recentCount,
   t("chat.recent"),
 ));
@@ -705,7 +740,7 @@ function toggleRecentGroup() {
 
 const pinnedSessions = computed(() =>
   sortSessionsForSidebar(
-    chatStore.sessions.filter((session) =>
+    visibleSessions.value.filter((session) =>
       session.isPinned,
     ),
   ),
@@ -913,7 +948,7 @@ function persistNewChatForm() {
     workspace: newChatWorkspace.value, categoryId: newChatCategoryId.value,
     agentPreset: newChatAgentPreset.value, baseUrl: newChatBaseUrl.value, apiKey: newChatApiKey.value,
     nativeModels: newChatNativeSelections.value,
-  });
+  }, props.botWorkspace ? newChatProfile.value : undefined);
 }
 
 watch([newChatAgent, newChatAgentMode, newChatProfile, newChatProvider, newChatModel, newChatCustomModel,
@@ -1162,6 +1197,7 @@ watch(newChatNativeCatalog, catalog => {
   }
 });
 const newChatDraftConfig = computed(() => ({
+  agent: newChatAgent.value,
   profile: newChatProfile.value,
   provider: isNewChatGlobalCodingAgent.value ? "" : newChatProvider.value,
   model: isNewChatGlobalCodingAgent.value ? newChatNativeSelection.value.model : newChatModel.value,
@@ -1277,7 +1313,7 @@ async function refreshNewChatAgentAvailability(sequence: number) {
     const availability = await fetchAgentAvailabilitySnapshot();
     if (!isCurrentNewChatOptionsLoad(sequence)) return;
     newChatAgentAvailability.value = availability;
-    newChatAgent.value = newChatAgentOptions.value.find(option => option.value === preferredNewChatAgent)?.value
+    newChatAgent.value = props.botWorkspace ? "hermes" : newChatAgentOptions.value.find(option => option.value === preferredNewChatAgent)?.value
       || newChatAgentOptions.value[0]?.value || AGENT_OPTIONS[0].value;
   } catch {
     if (isCurrentNewChatOptionsLoad(sequence) && !newChatAgentAvailability.value) {
@@ -1310,7 +1346,7 @@ async function loadNewChatModels(sequence: number) {
   }
 }
 
-async function openNewChatPage() {
+async function openNewChatPage(preserveSidebar = false) {
   if (newChatLoading.value) return;
   if (props.contentMode !== "chat") await router.push({ name: "hermes.chat" });
   const previousToolPanel = showNewChatPage.value ? newChatPreviousToolPanel.value : showToolPanel.value;
@@ -1325,9 +1361,9 @@ async function openNewChatPage() {
   isBatchMode.value = false;
   selectedSessionKeys.value.clear();
   showBatchDeleteConfirm.value = false;
-  const saved = loadNewChatFormPreferences(getStoredUserId());
+  const saved = loadNewChatFormPreferences(getStoredUserId(), props.botWorkspace ? profilesStore.activeProfileName || undefined : undefined);
   restoringNewChatForm = true;
-  preferredNewChatAgent = saved?.agent || loadNewChatAgent();
+  preferredNewChatAgent = props.botWorkspace ? "hermes" : saved?.agent || loadNewChatAgent();
   newChatAgent.value = preferredNewChatAgent;
   newChatAgentMode.value = saved?.mode || "scoped";
   newChatAgentPreset.value = saved?.agentPreset;
@@ -1335,7 +1371,7 @@ async function openNewChatPage() {
   newChatNativeSelections.value = saved?.nativeModels || {};
   newChatPresetReady.value = false;
   newChatCategoryId.value = saved?.categoryId ?? null;
-  newChatProfile.value = saved?.profile || profilesStore.activeProfileName
+  newChatProfile.value = (props.botWorkspace ? profilesStore.activeProfileName : saved?.profile) || profilesStore.activeProfileName
     || profilesStore.profiles.find(profile => profile.active)?.name || profilesStore.profiles[0]?.name || "default";
   newChatWorkspace.value = saved?.workspace || "";
   newChatProvider.value = saved?.provider || "";
@@ -1347,10 +1383,10 @@ async function openNewChatPage() {
   newChatModelsLoading.value = !newChatModelCatalogKnown.value;
   if (!saved) syncNewChatModelSelection();
   restoringNewChatForm = false;
-  if (isMobile.value) showSessions.value = false;
+  if (isMobile.value && !preserveSidebar) showSessions.value = false;
   showNewChatPage.value = true;
   void initWorkspaceComposable().then(() => {
-    if (isCurrentNewChatOptionsLoad(sequence) && !saved && !newChatWorkspace.value) {
+    if (isCurrentNewChatOptionsLoad(sequence) && !saved && !props.botWorkspace && !newChatWorkspace.value) {
       newChatWorkspace.value = mostRecentDefaultWorkspace.value || "";
     }
   });
@@ -1460,6 +1496,7 @@ async function submitNewChat(text: string, attachments?: Attachment[]): Promise<
     await router.push({
       name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
       params: { sessionId: session.id },
+      query: { profile: session.profile || undefined, ...(props.botWorkspace ? {} : { studio: "1" }) },
     });
     showNewChatPage.value = false;
     if (isMobile.value) showSessions.value = false;
@@ -1749,7 +1786,7 @@ function handleBatchDeleteConfirm() {
 function selectAllSessions() {
   if (isBatchDeleting.value) return;
   selectedSessionKeys.value.clear();
-  for (const session of chatStore.sessions) {
+  for (const session of visibleSessions.value) {
     if (session.id !== chatStore.activeSessionId) {
       selectedSessionKeys.value.add(sessionSelectionKey(session));
     }
@@ -1759,7 +1796,7 @@ function selectAllSessions() {
 
 const selectedCount = computed(() => selectedSessionKeys.value.size);
 const canSelectAll = computed(() => {
-  return chatStore.sessions.some(s => s.id !== chatStore.activeSessionId);
+  return visibleSessions.value.some(s => s.id !== chatStore.activeSessionId);
 });
 
 const contextSessionId = ref<string | null>(null);
@@ -1852,7 +1889,7 @@ async function handleDeleteCategoryConfirm() {
   try {
     await deleteSessionCategory(categoryId);
     sessionCategories.value = sessionCategories.value.filter((item) => item.id !== categoryId);
-    for (const session of chatStore.sessions) {
+    for (const session of visibleSessions.value) {
       if (session.categoryId === categoryId) session.categoryId = null;
     }
     const collapsedKey = `category-${categoryId}`;
@@ -2420,10 +2457,17 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   if (selection.provider === 'moa') void selectSessionMoaPreset(selection.model);
   else void selectSessionModel(selection.model, selection.provider);
 }
+// Mounting may reuse an already hydrated store, so initialize the empty Bot composer immediately.
+watch([() => chatStore.sessionsLoaded, () => chatStore.isLoadingSessions, () => chatStore.activeSessionId, () => profilesStore.activeProfileName, () => router.currentRoute.value.fullPath, () => newChatLoading.value], () => {
+  const empty = !chatStore.activeSessionId || (chatStore.activeSession?.isLocalOnly && chatStore.activeSession.messages.length === 0);
+  if (props.botWorkspace && chatStore.sessionsLoaded && !chatStore.isLoadingSessions && empty && !showNewChatPage.value) void openNewChatPage(true);
+}, { flush: 'post', immediate: true });
 </script>
 
 <template>
-  <div class="chat-panel" :class="{ 'chat-panel--standalone': standalone }">
+  <div class="chat-panel" :class="{ 'chat-panel--standalone': standalone, 'chat-panel--bot-workspace': botWorkspace }">
+    <BotIdentityDrawer v-if="botWorkspace" v-model:show="showBotIdentity" :profile="currentBot" />
+    <BotConfigDrawer v-if="botWorkspace" v-model:show="showBotConfig" :profile="currentBot" />
     <PageSidebar>
     <aside
       v-if="hasPageSidebar"
@@ -2431,7 +2475,14 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
       :class="{ collapsed: !showSessions, 'session-list--navigation': contentMode !== 'chat' }"
     >
       <div v-if="showSessions" class="page-sidebar-top">
-        <PageSidebarNav
+        <div v-if="botWorkspace" class="bot-session-heading">
+          <DesktopUpdateDownloadTab />
+          <div class="bot-session-heading__title"><span>{{ t('botWorkspace.conversations') }}</span><span>{{ visibleSessions.length }}</span></div>
+          <button class="bot-new-chat" type="button" @click="openNewChatPage()"><span aria-hidden="true">＋</span>{{ t('chat.newChat') }}</button>
+          <NInput v-model:value="botSessionSearch" size="small" clearable :placeholder="t('botWorkspace.searchConversations')" :aria-label="t('botWorkspace.searchConversations')" />
+          <div class="bot-session-tabs"><button type="button" :class="{ active: !botTasksOnly }" @click="botTasksOnly = false">{{ t('botWorkspace.conversations') }}</button><button type="button" :class="{ active: botTasksOnly }" @click="botTasksOnly = true">{{ t('botWorkspace.tasks') }}</button><button type="button" :aria-label="t('chat.sessionListActions')" @click="toggleBatchMode">···</button></div>
+        </div>
+        <PageSidebarNav v-else
           :active="contentMode === 'connections' ? 'connections' : contentMode === 'agents' ? 'agents' : contentMode === 'models' ? 'models' : chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
           :primary-label="t('chat.newChat')"
           @primary="openNewChatPage"
@@ -2532,12 +2583,12 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
       </div>
       <div v-if="contentMode === 'chat' && showSessions" class="session-items">
         <div
-          v-if="chatStore.isLoadingSessions && chatStore.sessions.length === 0"
+          v-if="chatStore.isLoadingSessions && visibleSessions.length === 0"
           class="session-loading"
         >
           <NSpin size="small" :description="t('common.loading')" />
         </div>
-        <div v-else-if="chatStore.sessions.length === 0" class="session-empty">
+        <div v-else-if="visibleSessions.length === 0" class="session-empty">
           {{ t("chat.noSessions") }}
         </div>
 
@@ -2560,7 +2611,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
             :selectable="isBatchMode"
             :selected="isSessionSelected(s)"
-            :show-profile="true"
+            :show-profile="!botWorkspace"
             :to="sessionHref(s.id)"
             :intercept-modified-navigation="desktopChatWindowAvailable"
             @select="handleSessionClick(s.id)"
@@ -2614,7 +2665,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
               :selectable="isBatchMode"
               :selected="isSessionSelected(s)"
-              :show-profile="true"
+              :show-profile="!botWorkspace"
               :category-label="recentCategoryLabel(s)"
               :to="sessionHref(s.id)"
               :intercept-modified-navigation="desktopChatWindowAvailable"
@@ -2698,7 +2749,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
               :selectable="isBatchMode"
               :selected="isSessionSelected(s)"
-              :show-profile="true"
+              :show-profile="!botWorkspace"
               :to="sessionHref(s.id)"
               :intercept-modified-navigation="desktopChatWindowAvailable"
               @select="handleSessionClick(s.id)"
@@ -2710,7 +2761,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
           </template>
         </template>
       </div>
-      <PageSidebarFooter v-if="showSessions" />
+      <PageSidebarFooter v-if="showSessions && !botWorkspace" />
     </aside>
     </PageSidebar>
 
@@ -2739,7 +2790,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
         <div class="new-chat-settings-body" :inert="newChatLoading || undefined">
           <!-- Float menus outside the modal panel so its overflow cannot clip them. -->
           <div class="new-chat-settings-group">
-            <label class="new-chat-field">
+            <label v-if="!botWorkspace" class="new-chat-field">
               <span class="new-chat-label">{{ t("sidebar.profiles") }}</span>
               <NSelect
                 v-bind="newChatSettingsSelectProps"
@@ -2999,9 +3050,14 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             :expanded="showSessions"
             @toggle="showSessions = !showSessions"
           />
-          <span class="header-session-title" dir="auto">{{ headerTitle }}</span>
+          <button v-if="botWorkspace" type="button" class="bot-header-identity" :disabled="!isSuperAdmin" @click="showBotIdentity = true">
+            <ProfileAvatar :name="currentBot?.name || 'default'" :avatar="currentBot?.avatar" :size="32" />
+            <span><strong dir="auto">{{ currentBotName }}</strong><small class="bot-header-session-title" dir="auto">{{ !showNewChatPage && chatStore.activeSession ? chatStore.activeSession.title : currentBot?.description || t('botWorkspace.personalAssistant') }}</small></span>
+          </button>
+          <span v-else class="header-session-title" dir="auto">{{ headerTitle }}</span>
         </div>
         <div class="header-actions">
+          <NButton v-if="botWorkspace && isSuperAdmin" class="bot-configuration-button" quaternary circle size="small" :title="t('botWorkspace.configuration')" :aria-label="t('botWorkspace.configuration')" @click="showBotConfig = true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--bg-card)"/><circle cx="15" cy="17" r="2" fill="var(--bg-card)"/></svg></NButton>
           <NButton
             v-if="!showNewChatPage && chatStore.activeSession?.workspace"
             class="header-workspace-button"
@@ -3019,7 +3075,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             </template>
           </NButton>
           <!-- chat/live mode toggle hidden -->
-          <template v-if="currentMode === 'chat' && !showNewChatPage">
+          <template v-if="currentMode === 'chat' && (!showNewChatPage || botWorkspace)">
             <NTooltip v-if="isSuperAdmin" trigger="hover">
               <template #trigger>
                 <NButton
@@ -3054,6 +3110,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               {{ desktopBrowserAvailable ? `${t("drawer.files")} / ${t("drawer.terminal")} / ${t("browser.title")}` : `${t("drawer.files")} / ${t("drawer.terminal")}` }}
             </NTooltip>
             <NDropdown
+              v-if="!showNewChatPage"
               v-model:show="showActiveSessionMenu"
               trigger="click"
               placement="bottom-end"
@@ -3114,17 +3171,18 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             :data-agent-deployment-status="chatStore.isLoadingMessages ? 'pending' : chatStore.isRunActive ? 'working' : 'settled'">
             <section v-if="showNewChatPage" class="new-chat-page" :aria-label="t('chat.newChat')">
               <div class="new-chat-intro">
-                <h1>{{ t('chat.newChatCardTitle') }}</h1>
-                <p>{{ t('chat.newChatCardSubtitle') }}</p>
+                <ProfileAvatar v-if="botWorkspace" :name="currentBot?.name || 'default'" :avatar="currentBot?.avatar" :size="64" />
+                <h1>{{ botWorkspace ? t('botWorkspace.greeting', { name: currentBotName }) : t('chat.newChatCardTitle') }}</h1>
+                <p>{{ botWorkspace ? (currentBot?.description || t('botWorkspace.startConversation')) : t('chat.newChatCardSubtitle') }}</p>
               </div>
-              <NewChatAgentCards :value="newChatAgent" :options="newChatAgentOptions"
+              <NewChatAgentCards v-if="!botWorkspace" :value="newChatAgent" :options="newChatAgentOptions"
                 :loading="newChatAgentLoading" :disabled="newChatLoading || newChatAgentLoading"
                 @update:value="handleNewChatAgentChange" />
               <div class="new-chat-compose">
                 <div class="new-chat-config-bar">
                   <div class="new-chat-config-actions">
-                    <NButton quaternary circle size="small" class="new-chat-config-icon" :disabled="newChatLoading" :title="newChatWorkspace || t('chat.workspace')"
-                      :aria-label="t('chat.workspace')" :aria-expanded="showWorkspaceModal && workspaceIsDraft" @click="openNewChatWorkspace">
+                    <NButton quaternary circle size="small" class="new-chat-config-icon" :disabled="newChatLoading" :title="newChatWorkspace || t(botWorkspace ? 'botWorkspace.workingDirectory' : 'chat.workspace')"
+                      :aria-label="t(botWorkspace ? 'botWorkspace.workingDirectory' : 'chat.workspace')" :aria-expanded="showWorkspaceModal && workspaceIsDraft" @click="openNewChatWorkspace">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
                     </NButton>
                     <DshSessionPresetSelect v-if="newChatAgent === 'dsh'" v-model="newChatAgentPreset" v-model:show="showNewChatPresetMode"
@@ -3155,7 +3213,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
                   :native-effort-choices="isNewChatGlobalCodingAgent ? newChatNativeEffortChoices : undefined"
                   :submit="submitNewChat" :model-label="newChatModelLabel" :model-disabled="newChatLoading || (!isNewChatGlobalCodingAgent && newChatModelsLoading)"
                   :model-expanded="showSessionModelPicker && sessionModelIsDraft"
-                  :persist-draft="false" :initial-text="initialComposerText" @model-click="openSessionModelPicker(null, $event)" />
+                  :persist-draft="botWorkspace" :initial-text="initialComposerText" @model-click="openSessionModelPicker(null, $event)" />
                 <button v-if="newChatHasNoModels" type="button" class="new-chat-config-hint" @click="openNewChatModelSettings">
                   {{ t('models.noModels') }} · {{ t('models.noProviderPromptAction') }}
                 </button>
@@ -4188,4 +4246,43 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   gap: 4px;
 }
 
+</style>
+
+<style scoped lang="scss">
+.chat-panel--bot-workspace {
+  .session-list { width: 248px; background: var(--bg-sidebar-surface); transition: opacity 160ms ease-out; }
+  .session-list.collapsed { width: 0; }
+  .page-sidebar-top { padding: 24px 16px 8px; }
+  .session-items { padding-inline: 8px; }
+  .new-chat-page { justify-content: center; gap: 16px; padding-bottom: 10vh; }
+  .new-chat-intro { display: flex; align-items: center; flex-direction: column; margin: 0 auto; width: min(736px, calc(100% - 48px)); }
+  .new-chat-intro h1 { margin: 24px 0 8px; font-size: 28px; font-weight: 550; letter-spacing: -.7px; }
+  .new-chat-intro p { font-size: 14px; color: var(--text-muted); max-width: 480px; line-height: 1.8; }
+  .new-chat-compose { width: min(736px, calc(100% - 48px)); }
+}
+.bot-session-heading { display: flex; flex-direction: column; gap: 16px; }
+.bot-session-heading__title { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 550; }
+.bot-session-heading__title span:last-child { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+.bot-new-chat { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; min-height: 36px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-card); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+.bot-new-chat:hover { background: var(--bg-secondary); }
+.bot-session-tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--border-color); }
+.bot-session-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); padding: 0 0 8px; font: inherit; font-size: 12px; cursor: pointer; }
+.bot-session-tabs button.active { color: var(--text-primary); border-bottom-color: var(--text-primary); }
+.bot-session-tabs button:last-child { margin-inline-start: auto; }
+.bot-header-identity { display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: transparent; text-align: start; color: var(--text-primary); min-width: 0; cursor: pointer; }
+.bot-header-identity > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bot-header-identity strong { font-size: 14px; font-weight: 550; }
+.bot-header-identity small { font-size: 11px; color: var(--text-muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-header-identity:disabled { cursor: default; }
+.bot-header-identity:focus-visible, .bot-new-chat:focus-visible, .bot-session-tabs button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
+@media (max-width: 768px) {
+  .chat-panel--bot-workspace .new-chat-intro h1 { font-size: 23px; }
+  .chat-panel--bot-workspace .new-chat-page { padding-bottom: 0; }
+  .bot-header-identity small { max-width: 180px; }
+  .chat-panel--bot-workspace .header-workspace-button { display: none; }
+  .chat-panel--bot-workspace .header-actions { gap: 2px; }
+  .chat-panel--bot-workspace .header-left { flex: 1; min-width: 0; }
+  .bot-header-identity { gap: 8px; flex: 1; }
+  .bot-header-identity strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
 </style>

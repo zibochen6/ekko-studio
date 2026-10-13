@@ -8,7 +8,7 @@ import { mergeMessagesWithFallback } from '../../packages/client/src/i18n/messag
 
 const messages = { en, tr: mergeMessagesWithFallback(en, tr) as typeof en }
 
-async function openDraft(page: Page, mobile: boolean, locale: 'en' | 'tr' = 'en') {
+async function openDraft(page: Page, mobile: boolean, locale: 'en' | 'tr' = 'en', waitUntil: 'load' | 'domcontentloaded' = 'load') {
   await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 })
   await page.addInitScript(locale => localStorage.setItem('hermes_locale', locale), locale)
   await authenticate(page, TEST_ACCESS_KEY, 'research')
@@ -17,7 +17,7 @@ async function openDraft(page: Page, mobile: boolean, locale: 'en' | 'tr' = 'en'
   await page.route('**/api/agents/availability', route => route.fulfill({ json: {
     revision: 1, updatedAt: new Date().toISOString(), agents: catalog.agents.map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1', { waitUntil })
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: messages[locale].chat.newChat, exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('lang', locale)
@@ -54,7 +54,7 @@ for (const locale of ['en', 'tr'] as const) for (const mobile of [false, true]) 
     await page.getByRole('button', { name: messages[locale].chat.send, exact: true }).click()
     await expect(page.locator('.agent-deployment-overlay')).toHaveCount(1)
     await expect(page).toHaveURL(/#\/hermes\/session\//)
-    const id = new URL(page.url()).hash.split('/').pop()!
+    const id = new URL(page.url()).hash.split('?')[0].split('/').pop()!
     await expect(page.locator(`[data-agent-deployment-target="${id}"]`)).toBeVisible()
     await expect(page.locator('.thinking-status-label')).toHaveText(messages[locale].chat.thinkingInProgress)
     await expect(page.locator('.agent-deployment-overlay')).toHaveCount(0, { timeout: 4000 })
@@ -87,12 +87,14 @@ for (const mobile of [false, true]) for (const outcome of ['load', 'error'] as c
   test(`deployment centres a scrolled card before avatar ${outcome} (${mobile ? 'mobile' : 'desktop'})`, async ({ page }) => {
     let releaseImage!: () => void
     const imageGate = new Promise<void>(resolve => { releaseImage = resolve })
-    await openDraft(page, mobile, 'tr')
-    await page.route(/thinking[^/]*\.gif/, async route => {
+    // Keep the shared brand avatar cold for both the card and live target.
+    // DOM readiness must not wait for the intentionally delayed image request.
+    await page.route('**/coding-agents/ekko-agent.png', async route => {
       await imageGate
       if (outcome === 'load') await route.continue()
       else await route.abort()
     })
+    await openDraft(page, mobile, 'tr', 'domcontentloaded')
     await page.locator('.new-chat-page textarea').fill('Deploy with a slow avatar')
     await page.locator('.agent-card-viewport').evaluate(el => {
       (el as HTMLElement).style.scrollSnapType = 'none'

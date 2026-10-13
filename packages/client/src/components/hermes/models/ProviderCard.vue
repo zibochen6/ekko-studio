@@ -6,7 +6,7 @@ import { useModelsStore } from '@/stores/hermes/models'
 import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
 import { checkCopilotToken, disableCopilot } from '@/api/hermes/copilot-auth'
-import { getStoredUserRole } from '@/api/client'
+import { getActiveProfileName, getModelsPageProfile, getStoredUserRole } from '@/api/client'
 import ProviderEditorModal from './ProviderEditorModal.vue'
 import { useI18n } from 'vue-i18n'
 
@@ -186,11 +186,12 @@ function clearVisibility() {
 }
 
 async function handleDelete() {
+  const actionProfile = getModelsPageProfile() || getActiveProfileName() || 'default'
   let copilotMsg = ''
   if (isCopilot.value) {
     // 提前查 source，让用户清楚移除会不会影响 VS Code/gh CLI 等其他工具的登录态
     try {
-      const status = await checkCopilotToken()
+      const status = await checkCopilotToken(actionProfile)
       if (status.source === 'env') copilotMsg = t('models.copilotDeleteHintEnv')
       else if (status.source === 'gh-cli') copilotMsg = t('models.copilotDeleteHintGhCli')
       else if (status.source === 'apps-json') copilotMsg = t('models.copilotDeleteHintAppsJson')
@@ -207,11 +208,13 @@ async function handleDelete() {
         if (isCopilot.value) {
           // Copilot 走显式 opt-in 模型：disable 把 enabled 置 false，
           // 仅当 token 来自 ~/.hermes/.env 时才清掉，gh-cli / apps.json 不动。
-          await disableCopilot()
+          await disableCopilot(actionProfile)
           // 服务端会在默认模型属于 copilot 时清掉 model.default，这里再清理本地
           // 会话级 model/provider，避免 Chat 页继续显示已下架的 copilot 模型。
-          chatStore.clearProviderFromSessions('copilot')
+          chatStore.clearProviderFromSessions('copilot', actionProfile)
+          if (actionProfile !== (getModelsPageProfile() || getActiveProfileName() || 'default')) return
           await modelsStore.fetchProviders()
+          if (actionProfile !== (getModelsPageProfile() || getActiveProfileName() || 'default')) return
         } else {
           await modelsStore.removeProvider(props.provider.provider, {
             source: props.provider.provider_source,

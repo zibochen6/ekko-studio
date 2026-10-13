@@ -549,10 +549,11 @@ export function setSessionPinned(id: string, is_pinned: boolean): Promise<{ ok: 
   })
 }
 
-export async function setSessionPushEnabled(id: string, pushEnabled: boolean): Promise<boolean> {
+export async function setSessionPushEnabled(id: string, pushEnabled: boolean, profile?: string): Promise<boolean> {
   try {
     await request(`/api/studio/sessions/${encodeURIComponent(id)}/push-enabled`, {
       method: 'POST',
+      ...(profile ? { headers: { 'X-Hermes-Profile': profile } } : {}),
       body: JSON.stringify({ pushEnabled }),
     })
     return true
@@ -580,10 +581,11 @@ export async function setSessionCategory(id: string, categoryId: number | null):
   })
 }
 
-export async function setSessionModel(id: string, model: string, provider: string, apiMode?: ProviderApiMode): Promise<boolean> {
+export async function setSessionModel(id: string, model: string, provider: string, apiMode?: ProviderApiMode, profile?: string): Promise<boolean> {
   try {
     await request(`/api/studio/sessions/${id}/model`, {
       method: 'POST',
+      ...(profile ? { headers: { 'X-Hermes-Profile': profile } } : {}),
       body: JSON.stringify({ model, provider, apiMode }),
     })
     return true
@@ -592,10 +594,11 @@ export async function setSessionModel(id: string, model: string, provider: strin
   }
 }
 
-export async function setSessionReasoningEffort(id: string, reasoningEffort: string, model?: string): Promise<boolean> {
+export async function setSessionReasoningEffort(id: string, reasoningEffort: string, model?: string, profile?: string): Promise<boolean> {
   try {
     await request(`/api/studio/sessions/${encodeURIComponent(id)}/reasoning-effort`, {
       method: 'POST',
+      ...(profile ? { headers: { 'X-Hermes-Profile': profile } } : {}),
       body: JSON.stringify({ reasoningEffort, ...(model !== undefined ? { model } : {}) }),
     })
     return true

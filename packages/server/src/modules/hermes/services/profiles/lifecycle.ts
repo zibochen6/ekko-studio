@@ -109,6 +109,30 @@ export function normalizeProfileName(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
+const profileMutationQueues = new Map<string, Promise<void>>()
+
+/** Keep identity writes and directory lifecycle changes in one ordering boundary. */
+export async function withProfileMutationLock<T>(names: unknown[], task: () => Promise<T>): Promise<T> {
+  const keys = [...new Set(names.map(normalizeProfileName).filter(Boolean))]
+    .map(name => `${resolve(detectHermesRootHome())}:${name}`).sort()
+  const acquire = async (index: number): Promise<T> => {
+    if (index === keys.length) return task()
+    const key = keys[index]
+    const previous = profileMutationQueues.get(key) || Promise.resolve()
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const next = previous.then(() => held, () => held)
+    profileMutationQueues.set(key, next)
+    await previous.catch(() => undefined)
+    try { return await acquire(index + 1) }
+    finally {
+      release()
+      if (profileMutationQueues.get(key) === next) profileMutationQueues.delete(key)
+    }
+  }
+  return acquire(0)
+}
+
 export function isReservedProfileName(value: unknown): boolean {
   const name = normalizeProfileName(value)
   return RESERVED_PROFILE_NAMES.has(name) || HERMES_COMMAND_NAMES.has(name)
@@ -137,6 +161,20 @@ export function validateProfileName(
     throw new ProfileLifecycleError(`Profile name '${name}' is reserved and cannot be used`, 400, 'profile_name_reserved')
   }
   return name
+}
+
+/** Resolve an existing Profile without the legacy helper's fallback to default. */
+export async function existingProfileDirectory(value: unknown, root = detectHermesRootHome()): Promise<string> {
+  const name = validateProfileName(value, { allowDefault: true })
+  const directory = name === 'default' ? resolve(root) : resolve(root, 'profiles', name)
+  const stat = await lstat(directory).catch(() => null)
+  if (!stat?.isDirectory() || stat.isSymbolicLink()) {
+    throw new ProfileLifecycleError(`Profile '${name}' does not exist`, 404, 'profile_not_found')
+  }
+  if (!await isRealPathWithin(directory, resolve(root))) {
+    throw new ProfileLifecycleError('Profile directory resolves outside Hermes home', 400, 'profile_path_invalid')
+  }
+  return directory
 }
 
 function profileDirectory(root: string, name: string): string {
@@ -245,6 +283,7 @@ export async function createProfileWithoutHermes(
   value: unknown,
   clone = false,
   root = detectHermesRootHome(),
+  initialize?: (directory: string) => Promise<void>,
 ): Promise<NativeProfileCreateResult> {
   const name = validateProfileName(value)
   const profilesRoot = await ensureProfilesRoot(root)
@@ -278,6 +317,7 @@ export async function createProfileWithoutHermes(
       }
     }
 
+    if (initialize) await initialize(staging)
     const result = await commitStagedProfile(staging, target, name)
     committed = true
     return {

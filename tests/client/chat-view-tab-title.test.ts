@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { nextTick } from 'vue'
+import { nextTick, reactive } from 'vue'
 import ChatView from '@/views/hermes/ChatView.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore, type Session } from '@/stores/hermes/chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import { fetchSessionContext } from '@/api/studio/sessions'
 
 vi.mock('@/components/common/PageLoading.vue', () => ({
   default: { props: ['show'], template: '<div><slot /></div>' },
@@ -21,12 +22,12 @@ vi.mock('@/components/hermes/chat/ChatPanel.vue', () => ({
   },
 }))
 
-const mockRoute = {
+const mockRoute = reactive({
   name: 'hermes.session' as string,
   params: {} as Record<string, string>,
   query: {} as Record<string, string>,
   meta: {} as Record<string, unknown>,
-}
+})
 
 vi.mock('vue-router', () => ({
   useRoute: () => mockRoute,
@@ -53,6 +54,7 @@ vi.mock('@/api/studio/sessions', () => ({
   archiveSession: vi.fn(),
   fetchSessions: vi.fn(),
   fetchSessionMessagesPage: vi.fn(),
+  fetchSessionContext: vi.fn(async () => null),
   fetchWorkspaceRunChangesForSession: vi.fn(async () => []),
   fetchWorkspaceRunChangeFile: vi.fn(async () => null),
   deleteSession: vi.fn(),
@@ -91,6 +93,8 @@ function makeSession(title: string): Session {
 describe('ChatView tab title', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
+    sessionStorage.clear()
     document.title = 'Ekko Studio'
     mockRoute.name = 'hermes.session'
     mockRoute.params = {}
@@ -157,6 +161,52 @@ describe('ChatView tab title', () => {
     const wrapper = mount(ChatView)
 
     expect(wrapper.getComponent({ name: 'ChatPanel' }).props('contentMode')).toBe('agents')
+    wrapper.unmount()
+  })
+
+  it('resolves the owning Bot of an old session link before loading its history', async () => {
+    const profiles = useProfilesStore()
+    const chat = useChatStore()
+    profiles.activeProfileName = 'default'
+    profiles.profiles = [{ name: 'default' }, { name: 'research' }] as any
+    const switchProfile = vi.spyOn(profiles, 'switchProfile').mockImplementation(async name => {
+      profiles.activeProfileName = name
+    })
+    mockRoute.params = { sessionId: 'research-session' }
+    vi.mocked(fetchSessionContext).mockResolvedValueOnce({
+      session_id: 'research-session', profile: 'research', messages: [], message_count: 2,
+    })
+    const wrapper = mount(ChatView)
+    await flushPromises()
+
+    expect(fetchSessionContext).toHaveBeenCalledWith('research-session')
+    expect(switchProfile).toHaveBeenCalledWith('research')
+    expect(chat.sessionProfileFilter).toBe('research')
+    expect(chat.loadSessions).toHaveBeenCalledWith('research', 'research-session')
+    wrapper.unmount()
+  })
+
+  it('does not apply a late owner lookup after navigating to another Bot', async () => {
+    const profiles = useProfilesStore()
+    const chat = useChatStore()
+    profiles.activeProfileName = 'default'
+    profiles.profiles = [{ name: 'default' }, { name: 'research' }] as any
+    const switchProfile = vi.spyOn(profiles, 'switchProfile').mockResolvedValue()
+    let resolveContext!: (value: any) => void
+    vi.mocked(fetchSessionContext).mockImplementationOnce(() => new Promise(resolve => { resolveContext = resolve }))
+    mockRoute.params = { sessionId: 'research-session' }
+    const wrapper = mount(ChatView)
+    await flushPromises()
+
+    mockRoute.name = 'hermes.chat'
+    mockRoute.params = {}
+    mockRoute.query = { profile: 'default' }
+    resolveContext({ session_id: 'research-session', profile: 'research', messages: [], message_count: 2 })
+    await flushPromises()
+
+    expect(switchProfile).not.toHaveBeenCalled()
+    expect(chat.loadSessions).toHaveBeenCalledWith('default', null)
+    expect(chat.loadSessions).not.toHaveBeenCalledWith('research', expect.anything())
     wrapper.unmount()
   })
 })

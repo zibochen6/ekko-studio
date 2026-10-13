@@ -2,7 +2,7 @@ import type { TaskPlanSnapshot } from '@/utils/task-plan'
 import { io, type Socket } from 'socket.io-client'
 import { disconnectBackgroundStatusObservers } from './background-status'
 import { onAuthInvalidated } from '../auth-invalidation'
-import { getBaseUrlValue, getApiKey } from '../client'
+import { getBaseUrlValue, getApiKey, getActiveProfileName } from '../client'
 import type { ChatCodingAgentId } from '../coding-agents'
 import type { ProviderApiMode } from './provider-api-mode'
 
@@ -208,8 +208,7 @@ export interface ResumeSessionPayload {
 // ============================
 
 let chatRunSocket: Socket | null = null
-let globalListenersRegistered = false
-let chatRunSocketProfile: string | null = null
+const chatRunSockets = new Map<string, Socket>()
 export type ChatRunTransport = 'chat-run' | 'global-agent'
 let chatRunSocketTransport: ChatRunTransport = 'chat-run'
 
@@ -752,8 +751,9 @@ export function respondClarify(
   clarifyId: string,
   response: string,
   transport: ChatRunTransport = 'chat-run',
+  profile?: string,
 ): void {
-  const socket = connectChatRun(null, transport)
+  const socket = connectChatRun(profile, transport)
   socket.emit('clarify.respond', {
     session_id: sessionId,
     clarify_id: clarifyId,
@@ -766,8 +766,9 @@ export function respondToolApproval(
   approvalId: string,
   choice: 'once' | 'session' | 'always' | 'deny',
   transport: ChatRunTransport = 'chat-run',
+  profile?: string,
 ): void {
-  const socket = connectChatRun(null, transport)
+  const socket = connectChatRun(profile, transport)
   socket.emit('approval.respond', {
     session_id: sessionId,
     approval_id: approvalId,
@@ -775,46 +776,26 @@ export function respondToolApproval(
   })
 }
 
-export function getChatRunSocket(transport?: ChatRunTransport): Socket | null {
+export function getChatRunSocket(transport?: ChatRunTransport, profile?: string): Socket | null {
+  if (profile) return chatRunSockets.get(JSON.stringify([getBaseUrlValue(), getApiKey(), transport || 'chat-run', profile])) || null
   if (transport && chatRunSocketTransport !== transport) return null
   return chatRunSocket
 }
 
 export function connectChatRun(requestedProfile?: string | null, transport: ChatRunTransport = 'chat-run'): Socket {
   const normalizedRequestedProfile = requestedProfile?.trim() || null
-  if (
-    chatRunSocket?.connected &&
-    chatRunSocketTransport === transport &&
-    (!normalizedRequestedProfile || chatRunSocketProfile === normalizedRequestedProfile)
-  ) {
-    return chatRunSocket
-  }
-
-  // Clean up old socket to prevent duplicate event listeners
-  if (chatRunSocket) {
-    chatRunSocket.removeAllListeners()
-    chatRunSocket.disconnect()
-    globalListenersRegistered = false
-    chatRunSocketProfile = null
-  }
-
   const baseUrl = getBaseUrlValue()
   const token = getApiKey()
 
-  // Get active profile from store (authoritative source)
-  let profile = normalizedRequestedProfile || 'default'
-  try {
-    if (!normalizedRequestedProfile) {
-      const { useProfilesStore } = require('@/stores/hermes/profiles')
-      const profilesStore = useProfilesStore()
-      profile = profilesStore.activeProfileName || 'default'
-    }
-  } catch {
-    // Fallback to localStorage during early initialization
-    profile = normalizedRequestedProfile || localStorage.getItem('hermes_active_profile_name') || 'default'
-  }
-  chatRunSocketProfile = profile
+  const profile = normalizedRequestedProfile || getActiveProfileName() || 'default'
   chatRunSocketTransport = transport
+
+  const key = JSON.stringify([baseUrl, token, transport, profile])
+  const existing = chatRunSockets.get(key)
+  if (existing) {
+    chatRunSocket = existing
+    return existing
+  }
 
   const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
   chatRunSocket = io(`${baseUrl}${namespace}`, {
@@ -832,14 +813,15 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
   // Retained callbacks from a replaced/invalidated socket must not dispatch
   // into handlers registered by a later authenticated session.
   const ownerSocket = chatRunSocket
+  chatRunSockets.set(key, ownerSocket)
   const on = (event: string, handler: (event: RunEvent) => void) => {
     ownerSocket.on(event, (data: RunEvent) => {
-      if (chatRunSocket === ownerSocket) handler(data)
+      if (chatRunSockets.get(key) === ownerSocket) handler(data)
     })
   }
 
   // Register global listeners only once per socket connection
-  if (!globalListenersRegistered) {
+  {
     // Message events
     on('message.delta', globalMessageDeltaHandler)
     on('message.interim', globalMessageInterimHandler)
@@ -891,24 +873,43 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
     on('session.title.updated', globalSessionTitleUpdatedHandler)
     on('session.workspace.updated', globalSessionWorkspaceUpdatedHandler)
     on('session.settings.updated', globalSessionSettingsUpdatedHandler)
-
-    globalListenersRegistered = true
   }
 
   return chatRunSocket
 }
 
+export interface ProfileActivityEvent {
+  event: string
+  session_id?: string
+  status?: string
+  resolved?: boolean
+  stale?: boolean
+  reason?: string
+  sessions?: Array<{ session_id: string; status: string; pending?: boolean }>
+}
+
+/** Lightweight account activity uses the same retained Profile connection as chat. */
+export function observeProfileActivity(profile: string, handler: (event: ProfileActivityEvent) => void): () => void {
+  const socket = connectChatRun(profile)
+  const events = ['session.activity.snapshot', 'session.activity', 'approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved']
+  const handlers = events.map(event => {
+    const callback = (data: ProfileActivityEvent) => handler({ ...data, event })
+    socket.on(event, callback)
+    return [event, callback] as const
+  })
+  return () => { for (const [event, callback] of handlers) removeSocketListener(socket, event, callback) }
+}
+
 export function disconnectChatRun(): void {
   disconnectBackgroundStatusObservers()
   sessionEventHandlers.clear()
-  if (chatRunSocket) {
-    chatRunSocket.removeAllListeners()
-    chatRunSocket.disconnect()
-    chatRunSocket = null
-    chatRunSocketProfile = null
-    chatRunSocketTransport = 'chat-run'
-    globalListenersRegistered = false
+  for (const socket of chatRunSockets.values()) {
+    socket.removeAllListeners()
+    socket.disconnect()
   }
+  chatRunSockets.clear()
+  chatRunSocket = null
+  chatRunSocketTransport = 'chat-run'
 }
 
 onAuthInvalidated(disconnectChatRun)

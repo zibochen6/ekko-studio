@@ -12,6 +12,7 @@ import {
 import * as hermesProfile from '../modules/hermes/services/profiles/profile'
 import { configureProfileConfig } from '../modules/studio/public/profile-config'
 import { resolveModelBaseUrlForProfile } from '../modules/hermes/services/models/endpoint'
+import { usesProfileOnlyCredentials } from '../modules/hermes/services/profiles/identity'
 
 const hasProfileExport = (name: string): boolean => (
   Object.prototype.hasOwnProperty.call(hermesProfile, name)
@@ -24,6 +25,7 @@ const listProfileNames = hasProfileExport('listProfileNamesFromDisk')
   : () => ['default']
 
 configureProfileConfig({
+  usesProfileOnlyCredentials,
   resolveModelBaseUrl: resolveModelBaseUrlForProfile,
   buildModelGroups,
   getProfilesBaseDir,

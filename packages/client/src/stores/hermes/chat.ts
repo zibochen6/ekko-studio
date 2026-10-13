@@ -4,9 +4,9 @@ import { historySessionSource, isBuiltinEkkoSession } from '@/utils/hermes/sessi
 import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
-import { startRunViaSocket, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { startRunViaSocket, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, observeProfileActivity, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
-import { getActiveProfileName } from '@/api/client'
+import { getActiveProfileName, getBaseUrl, getApiKey } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId } from '@/api/coding-agents'
 import { getDownloadUrl } from '@/api/studio/download'
@@ -607,18 +607,18 @@ function errorMessageText(error: unknown): string {
   }
 }
 
-async function uploadFiles(attachments: Attachment[]): Promise<{ name: string; path: string }[]> {
+async function uploadFiles(attachments: Attachment[], context: { profile: string; baseUrl: string; token: string }): Promise<{ name: string; path: string }[]> {
   if (attachments.length === 0) return []
   const formData = new FormData()
   for (const att of attachments) {
     if (att.file) formData.append('file', att.file, att.name)
   }
-  const token = localStorage.getItem('hermes_api_key') || ''
-  const profileName = getActiveProfileName()
+  const token = context.token
+  const profileName = context.profile
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
   if (profileName) headers['X-Hermes-Profile'] = profileName
-  const res = await fetch('/api/studio/uploads', {
+  const res = await fetch(`${context.baseUrl}/api/studio/uploads`, {
     method: 'POST',
     body: formData,
     headers,
@@ -1338,6 +1338,10 @@ export const useChatStore = defineStore('chat', () => {
   const seenSessionCommandEvents = new WeakSet<RunEvent>()
   const sessions = ref<Session[]>([])
   const activeSessionId = ref<string | null>(null)
+  const recentSessionByProfile = new Map<string, string>()
+  const loadedProfile = ref<string | null>(null)
+  const listedSessionIdsByProfile = ref(new Map<string, Set<string>>())
+  const sessionListRequestVersions = new Map<string, number>()
   const focusMessageId = ref<string | null>(null)
   const streamStates = ref<Map<string, { abort: () => void }>>(new Map())
   /** sessionId → server-reported isWorking status */
@@ -1346,6 +1350,43 @@ export const useChatStore = defineStore('chat', () => {
   const backgroundPendingBySession = ref<Map<string, number>>(new Map())
   let runtimeGeneration = 0
   const backgroundObservers = new Map<string, () => void>()
+  const profileActivityObservers = new Map<string, () => void>()
+  const observedActivity = ref(new Map<string, { profile: string; working: boolean; pending: boolean; unread: boolean }>())
+
+  function observeProfiles(profileNames: string[]) {
+    for (const [profile, dispose] of profileActivityObservers) {
+      if (!profileNames.includes(profile)) { dispose(); profileActivityObservers.delete(profile) }
+    }
+    for (const profile of profileNames) {
+      if (profileActivityObservers.has(profile)) continue
+      profileActivityObservers.set(profile, observeProfileActivity(profile, event => {
+        if (event.event === 'session.activity.snapshot') {
+          for (const activity of observedActivity.value.values()) {
+            if (activity.profile === profile) { activity.working = false; activity.pending = false }
+          }
+          for (const session of event.sessions || []) {
+            observedActivity.value.set(session.session_id, { profile, working: session.status === 'running', pending: Boolean(session.pending), unread: false })
+          }
+          return
+        }
+        if (!event.session_id) return
+        const previous = observedActivity.value.get(event.session_id) || { profile, working: false, pending: false, unread: false }
+        if (event.event === 'session.activity') {
+          previous.working = event.status === 'running'
+          previous.unread = event.status !== 'running' && activeSessionId.value !== event.session_id
+          if (!previous.working) previous.pending = false
+        } else if (event.event.endsWith('.requested')) previous.pending = true
+        else if (!event.stale && (event.resolved !== false || ['timeout', 'aborted', 'cancelled', 'canceled'].includes(event.reason || ''))) previous.pending = false
+        observedActivity.value.set(event.session_id, previous)
+      }))
+    }
+  }
+
+  function clearProfileActivityObservers() {
+    for (const dispose of profileActivityObservers.values()) dispose()
+    profileActivityObservers.clear()
+    observedActivity.value.clear()
+  }
 
   function clearBackgroundObservers() {
     for (const dispose of backgroundObservers.values()) dispose()
@@ -1354,16 +1395,17 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const unsubscribeAuthInvalidation = onAuthInvalidated(() => {
-    runtimeGeneration += 1
-    clearBackgroundObservers()
-    streamStates.value.clear()
-    serverWorking.value.clear()
+    resetRuntimeState()
+    clearProfileActivityObservers()
+    recentSessionByProfile.clear()
+    loadedProfile.value = null
   })
 
   onScopeDispose(() => {
     unsubscribeAuthInvalidation()
     runtimeGeneration += 1
     clearBackgroundObservers()
+    clearProfileActivityObservers()
   })
 
   function setBackgroundPending(sessionId: string, pending: unknown) {
@@ -1375,7 +1417,7 @@ export const useChatStore = defineStore('chat', () => {
       if (!backgroundObservers.has(sessionId)) {
         const generation = runtimeGeneration
         backgroundObservers.set(sessionId, observeBackgroundStatus(
-          sessionId, session.profile || 'default', runtimeTransport(),
+          sessionId, session.profile || 'default', sessionTransport(sessionId),
           pending => {
             if (generation === runtimeGeneration) setBackgroundPending(sessionId, pending)
           },
@@ -1546,12 +1588,46 @@ export const useChatStore = defineStore('chat', () => {
     return runtimeMode.value === 'global_agent' ? 'global-agent' : 'chat-run'
   }
 
+  function sessionTransport(sessionId: string): ChatRunTransport {
+    const session = sessions.value.find(entry => entry.id === sessionId)
+    return session?.source ? (session.source === 'global_agent' ? 'global-agent' : 'chat-run') : runtimeTransport()
+  }
+
+  function sessionSocket(sessionId: string) {
+    const session = sessions.value.find(entry => entry.id === sessionId)
+    return session ? getChatRunSocket(sessionTransport(sessionId), session.profile || 'default') : null
+  }
+
+  function getProfileActivity(profile: string) {
+    const ids = new Set<string>()
+    for (const [id, activity] of observedActivity.value) {
+      if (activity.profile === profile) ids.add(id)
+    }
+    for (const session of sessions.value) {
+      if ((session.profile || 'default') === profile) ids.add(session.id)
+    }
+    const activity = { working: 0, pending: 0, unread: 0 }
+    for (const id of ids) {
+      const session = getSessionActivity(id)
+      if (session.working) activity.working++
+      if (session.pending) activity.pending++
+      if (session.unread) activity.unread++
+    }
+    return activity
+  }
+
   function setRuntimeMode(mode: ChatRuntimeMode) {
     if (runtimeMode.value === mode) return
     activeRuntimeMode = mode
     runtimeMode.value = mode
+    resetRuntimeState()
+  }
+
+  function resetRuntimeState() {
     runtimeGeneration += 1
     clearBackgroundObservers()
+    listedSessionIdsByProfile.value.clear()
+    sessionListRequestVersions.clear()
     sessions.value = []
     pendingRunUsage.clear()
     completedUnreadSessions.value = new Set()
@@ -1562,12 +1638,21 @@ export const useChatStore = defineStore('chat', () => {
     pendingClarifies.value = new Map()
     pendingApprovalResponseIds.clear()
     pendingClarifyResponseIds.clear()
+    reasoningEffortWriteChains.clear()
+    reasoningEffortWriteTargets.clear()
+    reasoningEffortConfirmedValues.clear()
+    pushEnabledWriteChains.clear()
+    pushEnabledWriteTargets.clear()
+    pushEnabledConfirmedValues.clear()
     streamStates.value = new Map()
     serverWorking.value = new Set()
     pendingForkCommands.value = new Set()
     workspaceRunChangesBySession.value = new Map()
     abortStates.value = new Map()
+    compressionStates.value = new Map()
     sessionsLoaded.value = false
+    isLoadingSessions.value = false
+    messageLoadRequests.value.clear()
     clearActiveSession()
   }
 
@@ -1617,15 +1702,27 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // Display activity is broader than foreground execution (send/queue/voice).
+  function getSessionActivity(sessionId: string) {
+    const observed = observedActivity.value.get(sessionId)
+    const pending = Boolean(observed?.pending || pendingApprovals.value.has(sessionId) || pendingClarifies.value.has(sessionId))
+    return {
+      working: pending || Boolean(observed?.working) || isSessionLive(sessionId) || (backgroundPendingBySession.value.get(sessionId) || 0) > 0,
+      pending,
+      unread: activeSessionId.value !== sessionId && (Boolean(observed?.unread) || completedUnreadSessions.value.has(sessionId)),
+    }
+  }
+
   function isSessionWorking(sessionId: string): boolean {
-    return isSessionLive(sessionId) || (backgroundPendingBySession.value.get(sessionId) || 0) > 0
+    return getSessionActivity(sessionId).working
   }
 
   function isSessionCompletedUnread(sessionId: string): boolean {
-    return completedUnreadSessions.value.has(sessionId)
+    return getSessionActivity(sessionId).unread
   }
 
   function clearSessionCompletedUnread(sessionId: string) {
+    const observed = observedActivity.value.get(sessionId)
+    if (observed) observed.unread = false
     if (!completedUnreadSessions.value.has(sessionId)) return
     const next = new Set(completedUnreadSessions.value)
     next.delete(sessionId)
@@ -1665,13 +1762,11 @@ export const useChatStore = defineStore('chat', () => {
 
   function clearActiveSession() {
     activeSelectionSequence++
-    const sid = activeSessionId.value
     activeSessionId.value = null
     activeSession.value = null
     focusMessageId.value = null
-    setAbortState(sid, null)
-    setCompressionState(sid, null)
     removeItem(storageKey())
+    try { sessionStorage.removeItem(storageKey()) } catch { /* best-effort tab-local selection */ }
   }
 
   function attachWorkspaceChangesToMessages(sessionId: string) {
@@ -1788,50 +1883,44 @@ export const useChatStore = defineStore('chat', () => {
     return mapped
   }
 
+  function recordSessionList(profile: string | null | undefined, ids: Set<string>) {
+    if (!profile) listedSessionIdsByProfile.value.clear()
+    listedSessionIdsByProfile.value.set(profile || '*', ids)
+  }
+
+  function isSessionListed(sessionId: string, profile?: string | null): boolean {
+    const session = sessions.value.find(item => item.id === sessionId)
+    if (!session) return false
+    if (session.isLocalOnly || isSessionWorking(sessionId) || activeSessionId.value === sessionId) return true
+    const ids = listedSessionIdsByProfile.value.get(profile || session.profile || 'default')
+      || listedSessionIdsByProfile.value.get('*')
+    return !ids || ids.has(sessionId)
+  }
+
   async function loadSessions(profile?: string | null, preferredSessionId?: string | null) {
     const requestSequence = ++loadSessionsRequestSequence
+    const generation = runtimeGeneration
     const selectionSequence = activeSelectionSequence
+    const listKey = profile || '*'
+    const listVersion = (sessionListRequestVersions.get(listKey) || 0) + 1
+    sessionListRequestVersions.set(listKey, listVersion)
     isLoadingSessions.value = true
     try {
       const list = await fetchRuntimeSessions(profile)
-      if (requestSequence !== loadSessionsRequestSequence) return
-      const fresh = list.map(mapHermesSession)
+      if (requestSequence !== loadSessionsRequestSequence || generation !== runtimeGeneration
+        || sessionListRequestVersions.get(listKey) !== listVersion) return
+      loadedProfile.value = profile || null
       const selectionChanged = selectionSequence !== activeSelectionSequence
-      // Search can select a session outside the sidebar's first page. Keep
-      // that selection when mounting its route, including title-only hits.
-      const preserveSelection = selectionChanged || focusMessageId.value
-        || (preferredSessionId && preferredSessionId === activeSessionId.value)
-      const explicitlySelectedSession = preserveSelection && activeSessionId.value
-        ? sessions.value.find(session => session.id === activeSessionId.value) || activeSession.value
-        : null
-      // Preserve already-loaded messages for sessions that are still present,
-      // so we don't blow away the active session's messages on refresh.
-      const runtimeByIdBefore = new Map(sessions.value.map(s => [s.id, {
-        messages: s.messages,
-        contextTokens: s.contextTokens,
-        apiMode: s.apiMode,
-      }]))
-      for (const s of fresh) {
-        const prev = runtimeByIdBefore.get(s.id)
-        if (prev?.messages?.length) s.messages = prev.messages
-        if (prev?.contextTokens != null) s.contextTokens = prev.contextTokens
-        if (!s.apiMode && prev?.apiMode) s.apiMode = prev.apiMode
-      }
-      const freshIds = new Set(fresh.map(session => session.id))
-      const localOnlySessions = sessions.value.filter(session =>
-        session.isLocalOnly
-        && !freshIds.has(session.id)
-        && (!profile || session.profile === profile),
-      )
-      if (
-        explicitlySelectedSession
-        && !freshIds.has(explicitlySelectedSession.id)
-        && !localOnlySessions.some(session => session.id === explicitlySelectedSession.id)
-      ) {
-        localOnlySessions.unshift(explicitlySelectedSession)
-      }
-      sessions.value = [...localOnlySessions, ...fresh]
-      pruneCompletedUnreadSessions(new Set(sessions.value.map(s => s.id)))
+      const incomingIds = new Set(list.map(session => session.id))
+      recordSessionList(profile, incomingIds)
+      const freshList = list.map(summary => ensureSessionLoaded(summary))
+      const cached = sessions.value.filter(session => !incomingIds.has(session.id))
+      sessions.value = [...cached.filter(session => session.isLocalOnly), ...freshList, ...cached.filter(session => !session.isLocalOnly)]
+      // Session entities outlive a sidebar query. Streaming callbacks retain these
+      // objects while another Bot's list is visible, including unsent drafts.
+      const candidates = sessions.value.filter(session => !profile || (session.profile || 'default') === profile)
+      const available = candidates.filter(session => incomingIds.has(session.id) || session.isLocalOnly
+        || isSessionWorking(session.id) || session.id === preferredSessionId)
 
       // A session load may have started before the user selected or created a
       // different chat. Keep the refreshed list, but do not let that stale
@@ -1848,14 +1937,14 @@ export const useChatStore = defineStore('chat', () => {
       // then fallback to the most recent session.
       const currentId = activeSessionId.value
       const legacyActiveKey = legacyStorageKey()
-      const storedId = getItemBestEffort(storageKey()) || (legacyActiveKey ? getItemBestEffort(LEGACY_STORAGE_KEY) : null)
-      const targetId = preferredSessionId && sessions.value.some(s => s.id === preferredSessionId)
+      const storedId = recentSessionByProfile.get(profile || getProfileName()) || sessionStorage.getItem(runtimeStoragePrefix() + (profile || getProfileName())) || getItemBestEffort(runtimeStoragePrefix() + (profile || getProfileName())) || (legacyActiveKey ? getItemBestEffort(LEGACY_STORAGE_KEY) : null)
+      const targetId = preferredSessionId && available.some(s => s.id === preferredSessionId)
         ? preferredSessionId
-        : currentId && sessions.value.some(s => s.id === currentId)
+        : currentId && available.some(s => s.id === currentId)
           ? currentId
-          : storedId && sessions.value.some(s => s.id === storedId)
+          : storedId && available.some(s => s.id === storedId)
             ? storedId
-            : sessions.value[0]?.id
+            : available[0]?.id
       if (targetId) {
         await switchSession(targetId, targetId === currentId ? focusMessageId.value : null)
       } else {
@@ -1890,10 +1979,17 @@ export const useChatStore = defineStore('chat', () => {
     if (isStreaming.value) return
     if (isLoadingSessions.value) return
     try {
-      const list = await fetchRuntimeSessions(profile ?? sessionProfileFilter.value)
+      const scope = profile ?? loadedProfile.value ?? sessionProfileFilter.value
+      const generation = runtimeGeneration
+      const listKey = scope || '*'
+      const listVersion = (sessionListRequestVersions.get(listKey) || 0) + 1
+      sessionListRequestVersions.set(listKey, listVersion)
+      const list = await fetchRuntimeSessions(scope)
+      if (generation !== runtimeGeneration || sessionListRequestVersions.get(listKey) !== listVersion) return
       const incoming = list.map(mapHermesSession)
       const existingById = new Map(sessions.value.map(s => [s.id, s]))
       const incomingIds = new Set(incoming.map(s => s.id))
+      recordSessionList(scope, incomingIds)
 
       // Build the next array reusing existing objects (identity-preserving) and
       // inserting genuinely-new sessions as fresh objects.
@@ -1938,6 +2034,12 @@ export const useChatStore = defineStore('chat', () => {
         if (keep) next.push(keep)
       }
 
+      for (const existing of existingById.values()) {
+        if (!incomingIds.has(existing.id) && !next.includes(existing)
+          && ((scope && (existing.profile || 'default') !== scope) || existing.isLocalOnly || isSessionWorking(existing.id))) {
+          next.push(existing)
+        }
+      }
       sessions.value = next
       pruneCompletedUnreadSessions(new Set(next.map(s => s.id)))
 
@@ -1965,7 +2067,7 @@ export const useChatStore = defineStore('chat', () => {
           Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE),
           LIVE_CHAT_MAX_LOADED_MESSAGES,
         )
-      const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile)
+      const detail = await fetchSessionMessagesPage(sid, 0, limit, target.profile)
       if (!detail) return false
       const mapped = mapHermesMessages(detail.messages || [], detail.taskPlans, target.messages)
       target.messages = mapped
@@ -2054,6 +2156,7 @@ export const useChatStore = defineStore('chat', () => {
     const session: Session = {
       id: `${ts}_${hex}`,
       title: '',
+      profile: getProfileName(),
       source: runtimeMode.value === 'global_agent' ? 'global_agent' : 'cli',
       agent: 'hermes',
       messages: [],
@@ -2074,7 +2177,10 @@ export const useChatStore = defineStore('chat', () => {
     clearThinkingObservationFor(sessionId)
     activeSessionId.value = sessionId
     focusMessageId.value = focusId ?? null
-    setItemBestEffort(storageKey(), sessionId)
+    const targetProfile = sessions.value.find(session => session.id === sessionId)?.profile || getProfileName()
+    recentSessionByProfile.set(targetProfile, sessionId)
+    try { sessionStorage.setItem(runtimeStoragePrefix() + targetProfile, sessionId) } catch { /* best-effort tab-local selection */ }
+    setItemBestEffort(runtimeStoragePrefix() + targetProfile, sessionId)
     const legacyActiveKey = legacyStorageKey()
     if (legacyActiveKey) removeItem(legacyActiveKey)
     activeSession.value = sessions.value.find(s => s.id === sessionId) || null
@@ -2371,7 +2477,7 @@ export const useChatStore = defineStore('chat', () => {
     const isLocalOnly = target?.isLocalOnly === true || activeTarget?.isLocalOnly === true
     if (!isLocalOnly) {
       await reasoningEffortWriteChains.get(targetId)?.catch(() => false)
-      const ok = await setSessionModel(targetId, modelId, provider || '', preservedApiMode)
+      const ok = await setSessionModel(targetId, modelId, provider || '', preservedApiMode, session?.profile || 'default')
       if (!ok) return false
     }
     if (target) {
@@ -2400,8 +2506,9 @@ export const useChatStore = defineStore('chat', () => {
     clearMessageReference(sessionId)
     setAbortState(sessionId, null)
     if (activeSessionId.value === sessionId) {
-      if (sessions.value.length > 0) {
-        await switchSession(sessions.value[0].id)
+      const next = sessions.value.find(session => (session.profile || 'default') === (target?.profile || 'default'))
+      if (next) {
+        await switchSession(next.id)
       } else {
         const session = createSession()
         switchSession(session.id)
@@ -2424,8 +2531,9 @@ export const useChatStore = defineStore('chat', () => {
       completedUnreadSessions.value = next
     }
     if (activeSessionId.value === sessionId) {
-      if (sessions.value.length > 0) {
-        await switchSession(sessions.value[0].id)
+      const next = sessions.value.find(session => (session.profile || 'default') === (target?.profile || 'default'))
+      if (next) {
+        await switchSession(next.id)
       } else {
         clearActiveSession()
       }
@@ -3145,7 +3253,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function removeQueuedMessage(sessionId: string, messageId: string) {
     if (!dropQueuedUserMessage(sessionId, messageId)) return
-    getChatRunSocket(runtimeTransport())?.emit('cancel_queued_run', {
+    sessionSocket(sessionId)?.emit('cancel_queued_run', {
       session_id: sessionId,
       queue_id: messageId,
     })
@@ -3153,7 +3261,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function insertQueuedMessage(sessionId: string, messageId: string) {
     if (!(queuedUserMessages.value.get(sessionId) || []).some(message => message.id === messageId)) return
-    getChatRunSocket(runtimeTransport())?.emit('insert_queued_run', {
+    sessionSocket(sessionId)?.emit('insert_queued_run', {
       session_id: sessionId,
       queue_id: messageId,
     })
@@ -3461,7 +3569,7 @@ export const useChatStore = defineStore('chat', () => {
   function respondToClarifyFor(sessionId: string, clarifyId: string, response: string): PendingInteractionSubmitResult {
     const pending = pendingClarifies.value.get(sessionId)
     if (!pending || pending.clarifyId !== clarifyId) return 'missing'
-    respondClarify(sessionId, clarifyId, response, runtimeTransport())
+    respondClarify(sessionId, clarifyId, response, sessionTransport(sessionId), sessions.value.find(session => session.id === sessionId)?.profile || 'default')
     pendingClarifyResponseIds.set(sessionId, clarifyId)
     return 'submitted'
   }
@@ -3478,7 +3586,7 @@ export const useChatStore = defineStore('chat', () => {
   function respondApprovalFor(sessionId: string, approvalId: string, choice: PendingApproval['choices'][number]): PendingInteractionSubmitResult {
     const pending = pendingApprovals.value.get(sessionId)
     if (!pending || pending.approvalId !== approvalId) return 'missing'
-    respondToolApproval(sessionId, approvalId, choice, runtimeTransport())
+    respondToolApproval(sessionId, approvalId, choice, sessionTransport(sessionId), sessions.value.find(session => session.id === sessionId)?.profile || 'default')
     pendingApprovalResponseIds.set(sessionId, approvalId)
     return 'submitted'
   }
@@ -3646,7 +3754,7 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  async function sendMessage(content: string, attachments?: Attachment[]) {
+  async function sendMessage(content: string, attachments?: Attachment[], target?: string | Session) {
     const generation = runtimeGeneration
     if ((!content.trim() && !(attachments && attachments.length > 0))) return
 
@@ -3654,18 +3762,30 @@ export const useChatStore = defineStore('chat', () => {
 
     const trimmedContent = content.trim()
 
-    if (!activeSession.value) {
+    if (!target && !activeSession.value) {
       const session = createSession()
       switchSession(session.id)
     }
 
     // Capture session ID at send time — all callbacks use this, not activeSessionId
-    const sid = activeSessionId.value!
-    const shouldSendInitialSessionConfig = activeSession.value
-      ? activeSession.value.messageCount == null || activeSession.value.messageCount === 0
+    const sid = typeof target === 'string' ? target : target?.id || activeSessionId.value!
+    const currentTarget = sessions.value.find(session => session.id === sid)
+    if (!currentTarget) return
+    const sendingSession = { ...(typeof target === 'object' ? target : currentTarget) }
+    const appStore = useAppStore()
+    const sessionProfile = sendingSession.profile || useProfilesStore().activeProfileName || 'default'
+    const sendTransport = sessionTransport(sid)
+    const uploadContext = attachments?.length ? { profile: sessionProfile, baseUrl: getBaseUrl(), token: getApiKey() } : undefined
+    const ownsModelSelection = (getActiveProfileName() || 'default') === sessionProfile
+    const selectedModel = ownsModelSelection ? appStore.selectedModel : ''
+    const selectedProvider = ownsModelSelection ? appStore.selectedProvider : ''
+    const capturedGroups = appStore.profileModelGroups.find(entry => entry.profile === sessionProfile)?.groups || (ownsModelSelection ? appStore.modelGroups : [])
+    const sendMode = sendTransport === 'global-agent' ? 'global_agent' : 'default'
+    const shouldSendInitialSessionConfig = sendingSession
+      ? sendingSession.messageCount == null || sendingSession.messageCount === 0
       : false
-    const isProviderAgent = isProviderAgentSession(activeSession.value)
-    const isBuiltinSlashCommand = !attachments?.length && isBuiltinEkkoSession(activeSession.value) && isKnownEkkoSessionCommand(trimmedContent)
+    const isProviderAgent = isProviderAgentSession(sendingSession)
+    const isBuiltinSlashCommand = !attachments?.length && isBuiltinEkkoSession(sendingSession) && isKnownEkkoSessionCommand(trimmedContent)
     const isBridgeSlashCommand = !isProviderAgent && isKnownBridgeSessionCommand(trimmedContent)
     const isSessionSlashCommand = isBridgeSlashCommand || isBuiltinSlashCommand
     const isBridgeCompressCommand = isBridgeSlashCommand && /^\/compress(?:\s|$)/i.test(trimmedContent)
@@ -3727,7 +3847,7 @@ export const useChatStore = defineStore('chat', () => {
       let displayInput: string | ContentBlock[] | undefined
       if (attachments && attachments.length > 0) {
         // Has attachments: upload first, then build content blocks
-        const uploaded = await uploadFiles(attachments)
+        const uploaded = await uploadFiles(attachments, uploadContext!)
         if (generation !== runtimeGeneration) return
 
         // Update attachment URLs on the user message for display
@@ -3763,25 +3883,24 @@ export const useChatStore = defineStore('chat', () => {
         input = submittedContent
       }
 
-      const appStore = useAppStore()
-      await appStore.waitForModelsForRun()
+      await appStore.waitForModelsForRun(15000, sessionProfile)
       if (generation !== runtimeGeneration) return
-      const sessionModel = activeSession.value?.model || appStore.selectedModel
-      const sessionProvider = activeSession.value?.provider || appStore.selectedProvider
-      const sessionProfile = activeSession.value?.profile || useProfilesStore().activeProfileName || undefined
+      const loadedModels = appStore.modelsForProfile(sessionProfile)
+      const sessionModel = sendingSession?.model || selectedModel || loadedModels?.default
+      const sessionProvider = sendingSession?.provider || selectedProvider || loadedModels?.default_provider
       const profileModelGroups = sessionProfile
         ? appStore.profileModelGroups.find(entry => entry.profile === sessionProfile)?.groups
         : undefined
-      const runModelGroups = profileModelGroups?.length ? profileModelGroups : appStore.modelGroups
+      const runModelGroups = loadedModels?.groups || (profileModelGroups?.length ? profileModelGroups : capturedGroups)
       const providerGroup = runModelGroups.find(group => group.provider === sessionProvider)
-      const storedSource = activeSession.value?.source
+      const storedSource = sendingSession?.source
       const sessionSource: StartRunRequest['source'] = storedSource === 'global_agent'
         ? 'global_agent'
         : storedSource === 'workflow'
           ? 'workflow'
         : storedSource === 'group_chat'
           ? 'group_chat'
-        : isBuiltinEkkoSession(activeSession.value)
+        : isBuiltinEkkoSession(sendingSession)
           ? 'builtin_agent'
         : isProviderAgent
           ? 'coding_agent'
@@ -3791,16 +3910,16 @@ export const useChatStore = defineStore('chat', () => {
       const isCodingAgentExecution = sessionSource === 'builtin_agent' || sessionSource === 'coding_agent'
         || ((sessionSource === 'workflow' || sessionSource === 'group_chat' || sessionSource === 'global_agent') && isProviderAgent)
       const codingAgentId: ChatCodingAgentId =
-        (isBuiltinEkkoSession(activeSession.value) ? 'ekko-agent' : activeSession.value?.codingAgentId) ||
-        agentToCodingAgentId(activeSession.value?.agent) ||
+        (isBuiltinEkkoSession(sendingSession) ? 'ekko-agent' : sendingSession?.codingAgentId) ||
+        agentToCodingAgentId(sendingSession?.agent) ||
         'claude-code'
-      const codingAgentMode = codingAgentId === 'ekko-agent' ? 'scoped' : activeSession.value?.codingAgentMode || 'scoped'
+      const codingAgentMode = codingAgentId === 'ekko-agent' ? 'scoped' : sendingSession?.codingAgentMode || 'scoped'
       const codingAgentApiMode = isCodingAgentExecution && codingAgentMode !== 'global'
         ? normalizeCodingAgentApiMode(
-            activeSession.value?.apiMode || providerGroup?.api_mode,
+            sendingSession?.apiMode || providerGroup?.api_mode,
             inferCodingAgentApiMode(
               sessionProvider || providerGroup?.provider,
-              activeSession.value?.baseUrl || providerGroup?.base_url,
+              sendingSession?.baseUrl || providerGroup?.base_url,
             ),
           )
         : undefined
@@ -3810,7 +3929,7 @@ export const useChatStore = defineStore('chat', () => {
         session_id: sid,
         profile: sessionProfile,
         model: isCodingAgentExecution
-          ? (codingAgentMode === 'global' ? activeSession.value?.model || undefined : sessionModel || undefined)
+          ? (codingAgentMode === 'global' ? sendingSession?.model || undefined : sessionModel || undefined)
           : shouldSendInitialSessionConfig ? sessionModel || undefined : undefined,
         provider: isCodingAgentExecution
           ? (codingAgentMode === 'global' ? undefined : sessionProvider || undefined)
@@ -3820,27 +3939,28 @@ export const useChatStore = defineStore('chat', () => {
           models: group.models,
         })),
         queue_id: userMsg.id,
-        workspace: activeSession.value?.workspace || undefined,
-        category_id: activeSession.value?.categoryId ?? null,
+        workspace: sendingSession?.workspace || undefined,
+        category_id: sendingSession?.categoryId ?? null,
         source: sessionSource,
-        ...(runtimeMode.value === 'global_agent' ? { session_source: 'global_agent' as const } : {}),
+        ...(sendMode === 'global_agent' ? { session_source: 'global_agent' as const } : {}),
         ...(sessionSource === 'workflow' ? { session_source: 'workflow' as const } : {}),
         ...(isCodingAgentExecution
           ? {
               ...(codingAgentId === 'ekko-agent' ? { agent_id: 'ekko-agent' as const } : { coding_agent_id: codingAgentId }),
-              agent_preset: activeSession.value?.agentPreset,
+              agent_preset: sendingSession?.agentPreset,
               mode: codingAgentMode,
-              baseUrl: codingAgentMode === 'global' ? undefined : activeSession.value?.baseUrl || providerGroup?.base_url || undefined,
-              apiKey: codingAgentMode === 'global' ? undefined : activeSession.value?.apiKey || providerGroup?.api_key || undefined,
+              baseUrl: codingAgentMode === 'global' ? undefined : sendingSession?.baseUrl || providerGroup?.base_url || undefined,
+              apiKey: codingAgentMode === 'global' ? undefined : sendingSession?.apiKey || providerGroup?.api_key || undefined,
               apiMode: codingAgentApiMode,
             }
           : {}),
         // An absent override preserves the agent's native reasoning setting.
-        reasoning_effort: activeSession.value?.reasoningEffort || undefined,
-        push_enabled: activeSession.value?.pushEnabled !== false,
+        reasoning_effort: sendingSession?.reasoningEffort || undefined,
+        push_enabled: sendingSession?.pushEnabled !== false,
       }
-      if (shouldSendInitialSessionConfig && activeSession.value) {
-        activeSession.value.messageCount = Math.max(activeSession.value.messageCount || 0, 1)
+      if (shouldSendInitialSessionConfig && sendingSession) {
+        const target = sessions.value.find(session => session.id === sid)
+        if (target) target.messageCount = Math.max(target.messageCount || 0, 1)
       }
 
       // Helper to clean up this session's stream state
@@ -4584,7 +4704,7 @@ export const useChatStore = defineStore('chat', () => {
           activeRunMarker = null
         },
         undefined,
-        { onReconnectResume: applyReconnectResume, transport: runtimeTransport() },
+        { onReconnectResume: applyReconnectResume, transport: sendTransport },
       )
       runSubmitted = true
 
@@ -4656,7 +4776,7 @@ export const useChatStore = defineStore('chat', () => {
       if (streamStates.value.has(sid)) return
       streamStates.value.set(sid, {
         abort: () => {
-          getChatRunSocket(runtimeTransport())?.emit('abort', { session_id: sid })
+          sessionSocket(sid)?.emit('abort', { session_id: sid })
         },
       })
     }
@@ -5375,7 +5495,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     if (serverWorking.value.has(sid)) {
       setAbortState(sid, { aborting: true, synced: null })
-      getChatRunSocket(runtimeTransport())?.emit('abort', { session_id: sid })
+      sessionSocket(sid)?.emit('abort', { session_id: sid })
       const msgs = getSessionMsgs(sid)
       const lastMsg = msgs[msgs.length - 1]
       if (lastMsg?.isStreaming) {
@@ -5486,10 +5606,11 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function clearProviderFromSessions(provider: string) {
+  function clearProviderFromSessions(provider: string, profile = getActiveProfileName() || 'default') {
     if (!provider) return
     const target = provider.toLowerCase()
     for (const s of sessions.value) {
+      if ((s.profile || 'default') !== profile) continue
       if ((s.provider || '').toLowerCase() === target) {
         s.model = undefined
         s.provider = ''
@@ -5498,6 +5619,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function setSessionReasoningEffort(sessionId: string, effort: string, nativeModel?: string): Promise<boolean> {
+    const generation = runtimeGeneration
     const target = sessions.value.find(s => s.id === sessionId)
     const activeTarget = activeSession.value?.id === sessionId ? activeSession.value : null
     const session = target || activeTarget
@@ -5522,8 +5644,9 @@ export const useChatStore = defineStore('chat', () => {
     const previousWrite = reasoningEffortWriteChains.get(sessionId) || Promise.resolve(true)
     const write: Promise<boolean> = previousWrite
       .catch(() => false)
-      .then(() => nativeModel === undefined ? persistSessionReasoningEffort(sessionId, effort) : persistSessionReasoningEffort(sessionId, effort, nativeModel))
+      .then(() => generation === runtimeGeneration ? persistSessionReasoningEffort(sessionId, effort, nativeModel, session.profile || 'default') : false)
       .then((ok) => {
+        if (generation !== runtimeGeneration) return false
         if (ok) reasoningEffortConfirmedValues.set(sessionId, next)
         if (!ok && reasoningEffortWriteTargets.get(sessionId) === writeTarget) {
           const confirmed = reasoningEffortConfirmedValues.get(sessionId) || previous
@@ -5546,6 +5669,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function setSessionPushEnabled(sessionId: string, enabled: boolean): Promise<boolean> {
+    const generation = runtimeGeneration
     const target = sessions.value.find(s => s.id === sessionId)
     const activeTarget = activeSession.value?.id === sessionId ? activeSession.value : null
     const session = target || activeTarget
@@ -5563,8 +5687,9 @@ export const useChatStore = defineStore('chat', () => {
     const previousWrite = pushEnabledWriteChains.get(sessionId) || Promise.resolve(true)
     const write: Promise<boolean> = previousWrite
       .catch(() => false)
-      .then(() => persistSessionPushEnabled(sessionId, enabled))
+      .then(() => generation === runtimeGeneration ? persistSessionPushEnabled(sessionId, enabled, session.profile || 'default') : false)
       .then((ok) => {
+        if (generation !== runtimeGeneration) return false
         if (ok) pushEnabledConfirmedValues.set(sessionId, enabled)
         if (!ok && pushEnabledWriteTargets.get(sessionId) === enabled) {
           const confirmedEnabled = pushEnabledConfirmedValues.get(sessionId) || false
@@ -5610,6 +5735,10 @@ export const useChatStore = defineStore('chat', () => {
     isRunActive,
     isSessionLive,
     isSessionWorking,
+    getSessionActivity,
+    isSessionListed,
+    getProfileActivity,
+    observeProfiles,
     runStartedAt,
     isSessionCompletedUnread,
     clearSessionCompletedUnread,

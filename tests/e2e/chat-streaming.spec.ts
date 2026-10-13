@@ -15,15 +15,17 @@ async function waitForRun(page: Page, index = 0) {
     const state = (window as any).__PW_CHAT_SOCKET__
     const runs = state?.emitted?.filter((item: any) => item.event === 'run') || []
     const run = runs[runIndex]
+    const socket = run && (state.sockets.find((item: any) => item.id === run.socketId) || state.latest)
     return run
       ? {
           socket: {
-            url: state.latest.url,
-            options: state.latest.options,
+            url: socket.url,
+            options: socket.options,
           },
           run: run.payload,
           runCount: runs.length,
           socketCount: state.sockets.length,
+          profileSocketCount: state.sockets.filter((item: any) => item.url === socket.url && item.options?.query?.profile === socket.options?.query?.profile).length,
         }
       : null
   }, index)
@@ -113,8 +115,8 @@ test('freezes the current reasoning between the thinking animation and its tool 
 
   await expect(page.locator('.streaming-indicator .thinking-status')).toBeVisible()
   const thinkingAvatar = page.locator('.streaming-indicator .thinking-avatar')
-  await expect(thinkingAvatar).toHaveAttribute('src', '/coding-agents/hermes.png')
-  await expect(thinkingAvatar).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(thinkingAvatar).toHaveAttribute('src', /^data:image\/svg\+xml/)
+  await expect(thinkingAvatar).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(thinkingAvatar).toHaveCSS('object-fit', 'contain')
 
   await page.evaluate((sid) => {
@@ -519,7 +521,7 @@ test('settles a running subagent card when Stop completes without a child termin
   expect(api.unexpectedRequests).toEqual([])
 })
 
-test('uses the newly selected profile for the next chat-run socket after profile switch reload', async ({ page }) => {
+test('switches Bots without reload while keeping the original execution connection alive', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'default')
   const api = await mockHermesApi(page, { initialProfileName: 'default' })
   await mockChatSocket(page)
@@ -534,28 +536,42 @@ test('uses the newly selected profile for the next chat-run socket after profile
     const socket = (window as any).__PW_CHAT_SOCKET__.latest
     socket.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'run-default' })
     socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, run_id: 'run-default', delta: 'Default profile reply' })
-    socket.__trigger('run.completed', {
-      event: 'run.completed',
-      session_id: sid,
-      run_id: 'run-default',
-      output: 'Default profile reply',
-    })
   }, defaultRun.run.session_id)
-  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible()
 
-  await page.evaluate(() => window.localStorage.setItem('hermes_active_profile_name', 'research'))
-  await page.reload()
-  await page.waitForLoadState('domcontentloaded')
-  expect(await page.evaluate(() => window.localStorage.getItem('hermes_active_profile_name'))).toBe('research')
+  await page.evaluate(() => { (window as any).__botWorkspaceDocument = 'retained' })
+  await page.locator('.bot-row__select').filter({ hasText: 'research' }).click()
+  await expect(page).toHaveURL(/profile=research/)
+  expect(await page.evaluate(() => (window as any).__botWorkspaceDocument)).toBe('retained')
+  expect(await page.evaluate(() => window.sessionStorage.getItem('hermes_active_profile_name'))).toBe('research')
 
   await sendChatMessage(page, 'Use the active research profile')
-  const { socket, run } = await waitForRun(page)
+  const { socket, run } = await waitForRun(page, 1)
+  expect(await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.sockets.find((item: any) => item.options.query.profile === 'default').connected)).toBe(true)
 
   expect(socket.url).toBe('/chat-run')
   expect(socket.options.auth).toEqual({ token: TEST_ACCESS_KEY })
   expect(socket.options.query).toEqual({ profile: 'research' })
   expect(run.input).toBe('Use the active research profile')
   expect(await page.evaluate(() => window.localStorage.getItem('hermes_active_profile_name'))).toBe('research')
+
+  await page.evaluate(({ a, b }) => {
+    const sockets = (window as any).__PW_CHAT_SOCKET__.sockets
+    const first = sockets.find((item: any) => item.options.query.profile === 'default')
+    const second = sockets.find((item: any) => item.options.query.profile === 'research')
+    second.__trigger('run.started', { event: 'run.started', session_id: b, run_id: 'run-research' })
+    first.__trigger('message.delta', { event: 'message.delta', session_id: a, run_id: 'run-default', delta: ' finished in the background' })
+    first.__trigger('run.completed', { event: 'run.completed', session_id: a, run_id: 'run-default' })
+  }, { a: defaultRun.run.session_id, b: run.session_id })
+  await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible()
+  await expect(page.locator('.message.assistant').filter({ hasText: 'Default profile reply' })).toHaveCount(0)
+  await page.evaluate((sid) => {
+    const socket = (window as any).__PW_CHAT_SOCKET__.sockets.find((item: any) => item.options.query.profile === 'research')
+    socket.__trigger('message.delta', { event: 'message.delta', session_id: sid, run_id: 'run-research', delta: 'Research reply stays here' })
+    socket.__trigger('run.completed', { event: 'run.completed', session_id: sid, run_id: 'run-research' })
+  }, run.session_id)
+  await expect(page.getByText('Research reply stays here')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0)
 
   expect(api.requests.some((request) => request.pathname === '/api/hermes/profiles/active')).toBe(false)
   expect(api.unexpectedRequests).toEqual([])
@@ -580,7 +596,7 @@ test('keeps queued runs on one socket and does not duplicate streamed handlers',
   await sendChatMessage(page, 'Second queued contract')
   const second = await waitForRun(page, 1)
 
-  expect(second.socketCount).toBe(1)
+  expect(second.profileSocketCount).toBe(1)
   expect(second.runCount).toBe(2)
   expect(second.run.session_id).toBe(first.run.session_id)
   expect(second.run.input).toBe('Second queued contract')
@@ -1403,6 +1419,7 @@ test('keeps unnamed resumed tool traces hidden after session reload', async ({ p
   const sessionId = 'session-history-unnamed-tool'
   const sessionSummary = {
     id: sessionId,
+    profile: 'research',
     source: 'api_server',
     model: 'test-model',
     title: 'Unnamed tool history',
@@ -1507,6 +1524,7 @@ test('restores named resumed tool traces from assistant tool calls after session
   const sessionId = 'session-history-named-tool'
   const sessionSummary = {
     id: sessionId,
+    profile: 'research',
     source: 'api_server',
     model: 'test-model',
     title: 'Named tool history',
@@ -1628,7 +1646,7 @@ test('restores per-turn usage cards on resume and reload, including a summary-on
     }
   }, sessionId)
   const api = await mockHermesApi(page, { sessions: [{
-    id: sessionId, source: 'api_server', model: 'test-model', title: 'Run usage history', preview: 'First answer.',
+    id: sessionId, profile: 'research', source: 'api_server', model: 'test-model', title: 'Run usage history', preview: 'First answer.',
     started_at: 1, ended_at: 4, last_active: 4, message_count: 4, tool_call_count: 0,
     input_tokens: 33475, output_tokens: 386, cache_read_tokens: 32640, cache_write_tokens: 0,
     reasoning_tokens: 0, billing_provider: 'test-provider', estimated_cost_usd: 0.00045477,
@@ -1731,7 +1749,7 @@ test('keeps stored unclosed leading thinking text out of the reply after reload'
     }
   }, sessionId)
   const api = await mockHermesApi(page, { sessions: [{
-    id: sessionId, source: 'api_server', model: 'test-model', title: 'Thinking history', preview: '',
+    id: sessionId, profile: 'research', source: 'api_server', model: 'test-model', title: 'Thinking history', preview: '',
     started_at: 1, ended_at: 1, last_active: 1, message_count: 2, tool_call_count: 0,
     input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
     reasoning_tokens: 0, billing_provider: 'test-provider', estimated_cost_usd: 0,

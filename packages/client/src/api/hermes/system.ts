@@ -138,8 +138,8 @@ export async function fetchConfigModels(): Promise<ConfigModelsResponse> {
   return request<ConfigModelsResponse>('/api/hermes/config/models')
 }
 
-export async function fetchAvailableModels(): Promise<AvailableModelsResponse> {
-  return request<AvailableModelsResponse>('/api/hermes/available-models')
+export async function fetchAvailableModels(profile?: string): Promise<AvailableModelsResponse> {
+  return request<AvailableModelsResponse>(`/api/hermes/available-models${profile ? `?profile=${encodeURIComponent(profile)}` : ''}`)
 }
 
 export async function fetchAvailableModelsForProfile(profile: string): Promise<AvailableModelsResponse> {

@@ -18,7 +18,7 @@ for (const mobile of [false, true]) test(`OpenCode global errors show the provid
     agentId: 'opencode', name: 'OpenCode', status: 'ready', source: 'cli', scope: 'configured',
     models: [{ id: model, name: model }], checkedAt: '2026-10-11T00:00:00.000Z', cached: false,
   }] } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await selectNewChatAgent(page, 'OpenCode')

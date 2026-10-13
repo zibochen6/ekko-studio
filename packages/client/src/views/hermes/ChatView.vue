@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { isBotWorkspaceRoute } from '@/utils/bot-workspace'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { useRoute, useRouter } from 'vue-router'
 import ChatPanel from '@/components/hermes/chat/ChatPanel.vue'
@@ -7,6 +8,7 @@ import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import { fetchSessionContext } from '@/api/studio/sessions'
 
 const appStore = useAppStore()
 const chatStore = useChatStore()
@@ -25,6 +27,7 @@ const routeProfile = computed(() => {
   return typeof value === 'string' && value.trim() ? value : null
 })
 
+const botWorkspace = computed(() => isBotWorkspaceRoute(route))
 const isStandaloneChat = computed(() => route.meta?.standaloneChat === true)
 type ChatContentMode = 'chat' | 'connections' | 'agents' | 'models'
 
@@ -38,6 +41,7 @@ const productTitle = 'Ekko Studio'
 const initializing = ref(true)
 const routeLoading = ref(false)
 let routeLoadSequence = 0
+let profileApplySequence = 0
 let disposed = false
 const pageLoading = computed(() => contentMode.value === 'chat' && (
   initializing.value || routeLoading.value || chatStore.isLoadingSessions || chatStore.isLoadingMessages
@@ -66,11 +70,31 @@ async function loadRouteSession() {
 }
 
 async function applyRouteProfile() {
-  const profile = routeProfile.value
-  if (!profile || profile === profilesStore.activeProfileName) return
-  if (!profilesStore.profiles.some(item => item.name === profile)) return
+  const sequence = ++profileApplySequence
+  const sessionId = routeSessionId.value
+  const requestedProfile = routeProfile.value
+  let profile = requestedProfile
+  const isCurrent = () => !disposed && sequence === profileApplySequence
+    && routeSessionId.value === sessionId && routeProfile.value === requestedProfile
+  // Older links contain only a session ID. Resolve its owner before applying
+  // the visible Bot filter; the selected Bot must never determine ownership.
+  if (sessionId && !profile) {
+    const cached = chatStore.sessions.find(session => session.id === sessionId)
+    const context = cached || await fetchSessionContext(sessionId)
+    if (!isCurrent()) return false
+    if (context) profile = context.profile || 'default'
+  }
+  profile ||= botWorkspace.value ? profilesStore.activeProfileName : null
+  if (!profile) return true
+  if (profile === profilesStore.activeProfileName) {
+    if (botWorkspace.value || sessionId) chatStore.setSessionProfileFilter(profile)
+    return true
+  }
+  if (!profilesStore.profiles.some(item => item.name === profile)) return true
   await profilesStore.switchProfile(profile)
+  if (!isCurrent() || profilesStore.activeProfileName !== profile) return false
   chatStore.setSessionProfileFilter(profile)
+  return true
 }
 
 onMounted(async () => {
@@ -87,8 +111,9 @@ onMounted(async () => {
     chatStore.validateSessionProfileFilter(profilesStore.profiles.map(profile => profile.name))
     do {
       const target = [routeSessionId.value, routeProfile.value].join(':')
-      await applyRouteProfile()
+      const applied = await applyRouteProfile()
       if (disposed) return
+      if (!applied) continue
       await Promise.all([models, loadRouteSession()])
       if (target === [routeSessionId.value, routeProfile.value].join(':')) break
     } while (!disposed)
@@ -104,8 +129,8 @@ watch([routeSessionId, routeProfile], async ([sessionId]) => {
   const sequence = ++routeLoadSequence
   routeLoading.value = true
   try {
-    await applyRouteProfile()
-    if (disposed || sequence !== routeLoadSequence) return
+    const applied = await applyRouteProfile()
+    if (!applied || disposed || sequence !== routeLoadSequence) return
     if (!sessionId) {
       await chatStore.loadSessions(chatStore.sessionProfileFilter)
       return
@@ -131,6 +156,7 @@ watch([routeSessionId, routeProfile], async ([sessionId]) => {
   <PageLoading :show="pageLoading" :initial-only="contentMode === 'chat'" class="chat-view" :class="{ 'chat-view--standalone': isStandaloneChat }">
     <ChatPanel
       :standalone="isStandaloneChat"
+      :bot-workspace="botWorkspace"
       :content-mode="contentMode"
     />
   </PageLoading>

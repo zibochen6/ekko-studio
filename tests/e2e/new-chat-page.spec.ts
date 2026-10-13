@@ -12,7 +12,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) test(`Agent ca
   await page.route('**/api/agents/availability', route => route.fulfill({ json: {
     revision: 1, updatedAt: new Date().toISOString(), agents: catalog.agents.map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const active = page.locator('.agent-card.active')
   await expect(active).toHaveAttribute('data-agent', 'ekko-agent')
@@ -42,7 +42,7 @@ for (const mobile of [false, true]) test(`Agent loop preserves card scale when c
   await page.route('**/api/agents/availability', route => route.fulfill({json:{
     revision:1, updatedAt:new Date().toISOString(), agents:catalog.agents.map(agent => ({id:agent.id,installed:true,source:'user-cli'})),
   }}))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (mobile) await page.getByRole('button',{name:'Menu',exact:true}).click()
   await page.getByRole('button',{name:'New Chat',exact:true}).click()
   await expect(page.locator('.agent-card.active')).toHaveAttribute('data-agent','ekko-agent')
@@ -90,7 +90,7 @@ for (const mobile of [false, true]) test(`new chat uses cards and the existing c
   await page.route('**/api/agents/availability', route => route.fulfill({ json: {
     revision: 1, updatedAt: new Date().toISOString(), agents: catalog.agents.map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const draft = page.locator('.new-chat-page')
@@ -134,7 +134,7 @@ for (const mobile of [false, true]) test(`new chat uses cards and the existing c
   await expect(draft).toBeHidden()
   await expect(page.locator('.agent-card-ember')).toHaveCount(0)
   await expect(page).toHaveURL(/#\/hermes\/session\//)
-  const sessionId = new URL(page.url()).hash.split('/').pop()!
+  const sessionId = new URL(page.url()).hash.split('?')[0].split('/').pop()!
   await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload)).toMatchObject({
     session_id: sessionId, agent_id: 'ekko-agent', input: 'Start a fresh conversation',
   })
@@ -152,7 +152,7 @@ test('exiting or selecting a session restores the current conversation without c
   }, session.id)
   await mockHermesApi(page, { sessions: [session] })
   await mockChatSocket(page)
-  await page.goto(`/#/hermes/session/${session.id}`)
+  await page.goto(`/#/hermes/session/${session.id}?studio=1`)
   await expect(page.locator('.page-loading-overlay:visible')).toHaveCount(0)
   await expect(page.getByText('Previous answer', { exact: true })).toBeVisible()
   await page.locator('textarea').fill('Keep my previous draft')
@@ -170,7 +170,7 @@ test('exiting or selecting a session restores the current conversation without c
   await page.locator('.session-item').filter({ hasText: 'Existing conversation' }).first().click()
   await expect(draft).toBeHidden()
   await expect(page.locator('textarea')).toHaveValue('Keep my previous draft')
-  await expect(page).toHaveURL(new RegExp(`/hermes/session/${session.id}$`))
+  await expect(page).toHaveURL(new RegExp(`/hermes/session/${session.id}(?:\\?.*)?$`))
   expect(await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.filter((item: any) => item.event === 'run'))).toEqual([])
 })
 
@@ -182,7 +182,7 @@ test('Agent cards stop dragging after a fast exit and mouse release outside the 
   await page.route('**/api/agents/availability', route => route.fulfill({ json: {
     revision: 1, updatedAt: new Date().toISOString(), agents: catalog.agents.map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const viewport = page.locator('.agent-card-viewport')
   await expect(page.locator('.agent-card.active')).toHaveAttribute('data-agent', 'ekko-agent')
@@ -223,7 +223,7 @@ for (const loop of [false, true]) test(`Agent cards support vertical and horizon
     revision: 1, updatedAt: new Date().toISOString(), agents: (loop ? catalog.agents : catalog.agents.slice(0, 4))
       .map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const active = page.locator('.agent-card.active')
   const viewport = page.locator('.agent-card-viewport')
@@ -264,7 +264,7 @@ for (const brightness of ['light', 'dark'] as const) test(`Agent card edges fade
     contentType: 'image/svg+xml',
     body: '<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1000"><defs><linearGradient id="bg"><stop stop-color="#305181"/><stop offset=".5" stop-color="#b06c85"/><stop offset="1" stop-color="#d9aa70"/></linearGradient></defs><path fill="url(#bg)" d="M0 0h1440v1000H0z"/><path fill="none" stroke="#fff" stroke-opacity=".3" stroke-width="50" d="M0 900 1000 0M400 1000 1400 0"/></svg>',
   }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await expect(page.locator('html')).toHaveClass(/theme-has-custom-background/)
   const viewport = page.locator('.agent-card-viewport')
@@ -283,7 +283,7 @@ test('Agent cards support keyboard selection and continuous scrolling in dark mo
   await page.route('**/api/agents/availability', route => route.fulfill({ json: {
     revision: 1, updatedAt: new Date().toISOString(), agents: catalog.agents.map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const active = page.locator('.agent-card.active')
   await expect(active).toHaveAttribute('data-agent', 'ekko-agent')
@@ -322,7 +322,7 @@ for (const { width, height, agent } of [
   await page.route('**/api/agents/availability', route => route.fulfill({ json: {
     revision: 1, updatedAt: new Date().toISOString(), agents: catalog.agents.map(item => ({ id: item.id, installed: true, source: 'user-cli' })),
   } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await selectNewChatAgent(page, agent)
   const draft = page.locator('.new-chat-page')
@@ -358,7 +358,7 @@ for (const { width, height } of [
   await page.route('**/api/studio/workspace/directories', route => route.fulfill({ json: { directories: [
     { path: workspace, isFavorite: true, lastUsed: Date.now(), useCount: 1, createdAt: 1, updatedAt: 1 },
   ] } }))
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: '新建对话', exact: true }).click()
   const draft = page.locator('.new-chat-page')
@@ -418,7 +418,7 @@ for (const mobile of [false, true]) test(`missing required connection fields fit
   if (mobile) await page.addInitScript(() => localStorage.setItem('hermes_new_chat_agent_v1', 'dsh'))
   await mockHermesApi(page, { modelGroups: [{ provider: 'manual-provider', label: 'Manual Provider', models: ['manual-model'] }] })
   await mockChatSocket(page)
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   if (mobile) await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const draft = page.locator('.new-chat-page')
@@ -465,7 +465,7 @@ test('new chat shares the session model picker and sends the chosen model and pr
     api_mode: 'anthropic_messages', model_meta: { 'disabled-model': { disabled: true } },
   }, { provider: 'moa', label: 'MoA', models: ['ensemble'] }] })
   await mockChatSocket(page)
-  await page.goto('/#/hermes/chat')
+  await page.goto('/#/hermes/chat?studio=1')
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   const draft = page.locator('.new-chat-page')
   await draft.locator('textarea').fill('Use the model I selected')
@@ -519,7 +519,7 @@ for (const choice of ['standard', 'custom', 'moa'] as const) test(`Hermes draft 
     { ...TEST_MODEL_GROUP, models: ['test-model', 'other-model'] }, { provider: 'moa', label: 'MoA', models: ['ensemble'] },
   ] })
   await mockChatSocket(page)
-  await page.goto(`/#/hermes/session/${session.id}`)
+  await page.goto(`/#/hermes/session/${session.id}?studio=1`)
   await expect(page.locator('.page-loading-overlay:visible')).toHaveCount(0)
   await page.getByRole('button', { name: 'New Chat', exact: true }).click()
   await selectNewChatAgent(page, 'Hermes')
