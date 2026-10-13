@@ -28,7 +28,7 @@ const showTools = ref(false)
 const canManage = computed(() => isStoredSuperAdmin())
 const tools = computed(() => [
   { label: t('sidebar.skills'), key: 'hermes.skills' },
-  { label: t('sidebar.jobs'), key: 'hermes.jobs' },
+  { label: t('jobs.title'), key: 'hermes.jobs' },
   { label: t('botWorkspace.sharedKanban'), key: 'hermes.kanban' },
   { type: 'divider' as const, key: 'bot-tools-divider' },
   { label: t('botWorkspace.otherAgents'), key: 'hermes.chat' },

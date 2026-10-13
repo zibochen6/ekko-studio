@@ -25,7 +25,7 @@ async function setup(page: Page) {
 
 for (const { route, label, view, endpoint } of [
   { route: 'skills', label: 'Skills', view: '.skills-view', endpoint: '/api/hermes/skills' },
-  { route: 'jobs', label: 'Jobs', view: '.jobs-view', endpoint: '/api/hermes/jobs' },
+  { route: 'jobs', label: 'Scheduled Jobs', view: '.jobs-view', endpoint: '/api/hermes/jobs' },
   { route: 'kanban', label: 'Shared board', view: '.kanban-view', endpoint: '/api/hermes/kanban' },
 ]) {
   test(`opens ${route} for the current Bot, honors explicit links, and returns to that Bot`, async ({ page }) => {
