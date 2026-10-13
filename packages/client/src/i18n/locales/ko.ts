@@ -2,6 +2,9 @@ import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
   botWorkspace: {
+    refreshBots: "로컬 Bot 다시 검색",
+    sharedKanban: "공유 보드",
+    sharedKanbanHint: "모든 Bot이 공유하는 보드입니다. 담당자로 필터링하여 특정 Bot의 작업을 확인하세요.",
     workingDirectory: '작업 디렉터리',
     "bots": "AI 도우미",
     "personalWorkspace": "개인 작업 공간",

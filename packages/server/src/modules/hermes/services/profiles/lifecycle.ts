@@ -164,8 +164,12 @@ export function validateProfileName(
 }
 
 /** Resolve an existing Profile without the legacy helper's fallback to default. */
-export async function existingProfileDirectory(value: unknown, root = detectHermesRootHome()): Promise<string> {
-  const name = validateProfileName(value, { allowDefault: true })
+export async function existingProfileDirectory(
+  value: unknown,
+  root = detectHermesRootHome(),
+  options: { allowReserved?: boolean } = {},
+): Promise<string> {
+  const name = validateProfileName(value, { allowDefault: true, ...options })
   const directory = name === 'default' ? resolve(root) : resolve(root, 'profiles', name)
   const stat = await lstat(directory).catch(() => null)
   if (!stat?.isDirectory() || stat.isSymbolicLink()) {

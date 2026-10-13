@@ -2,6 +2,9 @@ import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
   botWorkspace: {
+    refreshBots: "إعادة اكتشاف البوتات المحلية",
+    sharedKanban: "لوحة مشتركة",
+    sharedKanbanHint: "لوحة مشتركة لجميع البوتات. صفِّ حسب المسؤول لعرض مهام بوت معيّن.",
     workingDirectory: 'مجلد العمل',
     "bots": "المساعدون",
     "personalWorkspace": "مساحة العمل الشخصية",

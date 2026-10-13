@@ -2,6 +2,9 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   botWorkspace: {
+    refreshBots: "ローカル Bot を再検出",
+    sharedKanban: "共有ボード",
+    sharedKanbanHint: "すべての Bot で共有するボードです。担当者で絞り込むと特定の Bot のタスクを表示できます。",
     workingDirectory: '作業ディレクトリ',
     "bots": "AI アシスタント",
     "personalWorkspace": "個人ワークスペース",

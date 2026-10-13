@@ -330,7 +330,7 @@ for (const [route, sidebar, destination, destinationRoute] of [
     const item = menu.getByRole('link', { name: destination, exact: true })
     await expect(item.locator('span')).toBeVisible()
     await item.click()
-    await expect(page).toHaveURL(new RegExp(`#${destinationRoute}$`))
+    await expect(page).toHaveURL(new RegExp(`#${destinationRoute}${route === '/hermes/jobs' ? '\\?profile=research' : ''}$`))
     await expect(drawer).not.toBeVisible()
     await page.getByRole('button', { name: 'Menu', exact: true }).click()
     await expect(drawer.getByRole('link', { name: 'Chat', exact: true })).toBeInViewport()

@@ -61,6 +61,15 @@ queue and control operations. Drafts and recent selections are scoped to the
 account and Profile; tab-local selections keep simultaneous windows independent.
 Old session deep links resolve their owner before selecting the visible Bot.
 
+Local discovery reads the configured `HERMES_HOME` (default `~/.hermes`) and its
+direct `profiles/` directories. The Bot roster refreshes on returning to the
+window and offers an explicit rescan; it does not aggregate arbitrary independent
+Hermes installations or remote hosts. Skills and scheduled-job links resolve
+their explicit Profile before loading an editor. Their local state is isolated
+per Profile, while deliberately shared external skill directories remain shared.
+Kanban retains its existing shared boards and Profile assignees; the workspace
+labels that entry as a shared board rather than implying a private Bot database.
+
 ## Server Structure
 
 Server code is separated by business ownership under `modules/studio`,

@@ -2,6 +2,9 @@ import { socialMessagesDe } from '../social-messages-locales'
 
 export default {
   botWorkspace: {
+    refreshBots: "Lokale Bots neu erkennen",
+    sharedKanban: "Gemeinsames Board",
+    sharedKanbanHint: "Ein gemeinsames Board für alle Bots. Nach Zuständigkeit filtern, um die Aufgaben eines Bots zu sehen.",
     workingDirectory: 'Arbeitsverzeichnis',
     "bots": "Assistenten",
     "personalWorkspace": "PERSÖNLICHER ARBEITSBEREICH",

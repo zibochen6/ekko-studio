@@ -31,6 +31,7 @@ const message = useMessage()
 const dialog = useDialog()
 const kanbanStore = useKanbanStore()
 const profilesStore = useProfilesStore()
+let disposed = false
 
 const showCreateForm = ref(false)
 const showCreateBoardForm = ref(false)
@@ -74,6 +75,7 @@ async function applyBoardSelection(candidate: string | null, notify = true, forc
   showCreateBoardForm.value = false
   if (notify && recovered && kanbanStore.boardWarning) message.warning(kanbanStore.boardWarning)
   await replaceRouteBoard(board)
+  if (disposed) return
   if (forceRefresh || board !== previousBoard) {
     await kanbanStore.refreshAll()
   }
@@ -181,6 +183,16 @@ watch(() => route.query.board, async () => {
   await applyBoardSelection(routeBoard(), false)
 })
 
+watch(() => profilesStore.activeProfileName, async (profile) => {
+  if (!routeReady.value) return
+  selectedTaskId.value = null
+  showCreateForm.value = false
+  showCreateBoardForm.value = false
+  kanbanStore.stopEventStream()
+  await kanbanStore.refreshAll()
+  if (!disposed && profile === profilesStore.activeProfileName) kanbanStore.startEventStream()
+})
+
 const initializing = ref(true)
 
 onMounted(async () => {
@@ -190,7 +202,9 @@ onMounted(async () => {
       kanbanStore.fetchCapabilities(),
       profilesStore.profiles.length === 0 ? profilesStore.fetchProfiles() : Promise.resolve(),
     ])
+    if (disposed) return
     await applyBoardSelection(routeBoard(), true, true)
+    if (disposed) return
     kanbanStore.startEventStream()
     routeReady.value = true
     refreshTimer.value = setInterval(() => {
@@ -204,6 +218,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   kanbanStore.stopEventStream()
   if (refreshTimer.value) clearInterval(refreshTimer.value)
 })
@@ -303,7 +318,7 @@ async function handleDispatch() {
   <PageLoading :show="initializing || (kanbanStore.loading && kanbanStore.tasks.length === 0)" class="kanban-view">
     <PageHeader>
     <header class="page-header">
-      <h2 class="header-title">{{ t('kanban.title') }}</h2>
+      <h2 class="header-title" :title="t('botWorkspace.sharedKanbanHint')">{{ t('kanban.title') }}<small class="shared-board-label">{{ t('botWorkspace.sharedKanban') }}</small></h2>
       <div class="header-actions">
         <NSelect
           v-model:value="selectedBoardValue"
@@ -467,6 +482,8 @@ async function handleDispatch() {
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
+
+.shared-board-label { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; font-weight: 400; }
 
 .kanban-view {
   height: 100%;

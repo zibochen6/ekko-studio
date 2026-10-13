@@ -2,7 +2,7 @@
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NButton, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import JobsPanel from '@/components/hermes/jobs/JobsPanel.vue'
@@ -20,6 +20,8 @@ const selectedJobId = ref<string | null>(null)
 const sortBy = ref<'time' | 'name'>('name')
 const sortAsc = ref(true)
 const activeProfileName = computed(() => profilesStore.activeProfileName || 'default')
+let loadSequence = 0
+let disposed = false
 
 const jobNameMap = computed(() => {
   const map: Record<string, string> = {}
@@ -37,9 +39,13 @@ async function ensureProfileSelection() {
 }
 
 async function reloadJobsForProfile() {
+  const sequence = ++loadSequence
   selectedJobId.value = null
-  jobsStore.jobs = []
+  showModal.value = false
+  editingJob.value = null
+  jobsStore.resetProfile()
   await ensureProfileSelection()
+  if (disposed || sequence !== loadSequence) return
   await jobsStore.fetchJobs()
 }
 
@@ -48,6 +54,8 @@ const initializing = ref(true)
 onMounted(() => {
   void reloadJobsForProfile().finally(() => { initializing.value = false })
 })
+watch(activeProfileName, () => { void reloadJobsForProfile() })
+onUnmounted(() => { disposed = true; loadSequence++; jobsStore.resetProfile() })
 
 function openCreateModal() {
   editingJob.value = null
@@ -150,6 +158,7 @@ function arrowIcon(field: 'time' | 'name'): string {
 
       <div class="jobs-bottom">
         <JobRunHistory
+          :key="activeProfileName"
           :selected-job-id="selectedJobId"
           :job-name-map="jobNameMap"
           :profile-key="activeProfileName"

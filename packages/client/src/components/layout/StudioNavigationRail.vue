@@ -7,8 +7,11 @@ import { isStoredSuperAdmin } from '@/api/client'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import PageSidebarFooter from './PageSidebarFooter.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
+import { useProfilesStore } from '@/stores/hermes/profiles'
+import { BOT_MANAGEMENT_ROUTES } from '@/utils/bot-management-route'
 
 const route = useRoute()
+const profiles = useProfilesStore()
 const { t } = useI18n()
 const canManageAgents = computed(() => isStoredSuperAdmin())
 const entries = computed(() => [
@@ -44,7 +47,7 @@ function handleNavigate(key: string) {
     <nav class="studio-navigation-rail__nav">
       <NTooltip v-for="entry in entries" :key="entry.key" placement="right" trigger="hover">
         <template #trigger>
-          <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: entry.route }" :active="activeKey === entry.key" :aria-label="t(entry.label)" @click="handleNavigate(entry.key)">
+          <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: entry.route, ...(entry.key === 'chat' && BOT_MANAGEMENT_ROUTES.has(String(route.name)) ? { query: { profile: profiles.activeProfileName || 'default' } } : {}) }" :active="activeKey === entry.key" :aria-label="t(entry.label)" @click="handleNavigate(entry.key)">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="entry.path" /></svg>
           </RouteLinkItem>
         </template>

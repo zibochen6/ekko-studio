@@ -2,6 +2,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { hasApiKey, isStoredSuperAdmin } from '@/api/client'
 import { hasDesktopBrowserBridge } from '@/utils/desktop-bridge'
 import { resolveLoginRedirect } from '@/utils/login-redirect'
+import { applyBotManagementProfile, BOT_MANAGEMENT_ROUTES } from '@/utils/bot-management-route'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -312,7 +313,9 @@ function isDesktopShell(): boolean {
   }).hermesDesktop?.isDesktop === true
 }
 
+let navigationSequence = 0
 router.beforeEach(async (to, _from, next) => {
+  const sequence = ++navigationSequence
   await ensureDesktopAuth()
 
   if (to.name === 'codingAgent.config' && ['plugins', 'presets'].includes(String(to.params.section)) && to.params.agentId !== 'dsh') {
@@ -340,6 +343,16 @@ router.beforeEach(async (to, _from, next) => {
   if (to.meta.requiresSuperAdmin && !isStoredSuperAdmin()) {
     next({ name: 'hermes.chat' })
     return
+  }
+
+  if (BOT_MANAGEMENT_ROUTES.has(String(to.name))) {
+    const { useProfilesStore } = await import('@/stores/hermes/profiles')
+    const applied = await applyBotManagementProfile(to.query.profile, useProfilesStore(), () => sequence === navigationSequence)
+    if (!applied) {
+      if (sequence === navigationSequence) next({ name: 'hermes.chat' })
+      else next(false)
+      return
+    }
   }
 
   next()

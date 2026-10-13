@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
 const mockFetchSkills = vi.hoisted(() => vi.fn())
@@ -19,9 +19,11 @@ vi.mock('@/api/hermes/write-gate', () => ({
   fetchPendingWrites: mockFetchPendingWrites,
 }))
 
-vi.mock('@/stores/hermes/profiles', () => ({
-  useProfilesStore: () => mockProfilesStore,
-}))
+vi.mock('@/stores/hermes/profiles', async () => {
+  const { reactive } = await import('vue')
+  const store = reactive(mockProfilesStore)
+  return { useProfilesStore: () => store }
+})
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -77,6 +79,8 @@ vi.mock('@/components/hermes/skills/SkillDetail.vue', () => ({
 }))
 
 import SkillsView from '@/views/hermes/SkillsView.vue'
+import { useProfilesStore } from '@/stores/hermes/profiles'
+enableAutoUnmount(afterEach)
 
 describe('SkillsView', () => {
   it.each(['codex', 'pi', 'grok', 'opencode', 'dsh', 'claude', 'cursor'] as const)('shows shared skills without edit controls for %s', async target => {
@@ -154,7 +158,24 @@ describe('SkillsView', () => {
     expect(detail.text()).toBe('first-skill')
     expect(wrapper.get('.skill-list-stub').attributes('data-selected')).toBe('alpha/first-skill')
     expect(wrapper.find('.n-select-stub').exists()).toBe(false)
-    expect(mockFetchSkills).toHaveBeenCalledWith(undefined, 'hermes')
+    expect(mockFetchSkills).toHaveBeenCalledWith('default', 'hermes')
     expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('keeps the selected Bot skills after an earlier list resolves late', async () => {
+    let release!: (value: unknown) => void
+    mockFetchSkills.mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+    const wrapper = mount(SkillsView, { global: { stubs: {
+      SkillImportModal: true, SkillExternalDirsModal: true, PendingWriteApprovals: true,
+    } } })
+    await flushPromises()
+    mockFetchSkills.mockResolvedValueOnce({ categories: [{ name: 'research', skills: [{ name: 'Research skill' }] }], archived: [] })
+    useProfilesStore().activeProfileName = 'research'
+    await flushPromises()
+    release({ categories: [{ name: 'default', skills: [{ name: 'Late default skill' }] }], archived: [] })
+    await flushPromises()
+    expect(mockFetchSkills).toHaveBeenLastCalledWith('research', 'hermes')
+    expect(wrapper.get('.skill-detail-stub').text()).toBe('Research skill')
+    expect(wrapper.text()).not.toContain('Late default skill')
   })
 })

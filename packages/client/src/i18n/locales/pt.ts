@@ -2,6 +2,9 @@ import { socialMessagesPt } from '../social-messages-locales'
 
 export default {
   botWorkspace: {
+    refreshBots: "Detetar novamente Bots locais",
+    sharedKanban: "Quadro partilhado",
+    sharedKanbanHint: "Um quadro partilhado por todos os Bots. Filtre por responsável para ver as tarefas de um Bot.",
     workingDirectory: 'Diretório de trabalho',
     "bots": "Assistentes",
     "personalWorkspace": "ESPAÇO PESSOAL",

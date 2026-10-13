@@ -2,6 +2,9 @@ import { socialMessagesZhTw } from '../social-messages'
 
 export default {
   botWorkspace: {
+    refreshBots: "重新偵測本機 Bot",
+    sharedKanban: "共用看板",
+    sharedKanbanHint: "所有 Bot 共用的任務看板，可依負責人篩選某個 Bot 的任務。",
     workingDirectory: '工作目錄',
     "bots": "AI 助手",
     "personalWorkspace": "個人工作空間",

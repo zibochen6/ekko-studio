@@ -2,6 +2,9 @@ import { socialMessagesZh } from '../social-messages'
 
 export default {
   botWorkspace: {
+    refreshBots: "重新检测本地 Bot",
+    sharedKanban: "共享看板",
+    sharedKanbanHint: "所有 Bot 共用的任务看板，可按负责人筛选某个 Bot 的任务。",
     workingDirectory: '工作目录',
     "bots": "AI 助手",
     "personalWorkspace": "个人工作空间",

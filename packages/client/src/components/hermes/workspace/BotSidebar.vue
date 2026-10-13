@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NDropdown, NPopover } from 'naive-ui'
@@ -12,11 +12,14 @@ import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
 import BotIdentityDrawer from './BotIdentityDrawer.vue'
 import BotConfigDrawer from './BotConfigDrawer.vue'
 import { botDisplayName, botRosterCollapsed, toggleBotRoster } from '@/utils/bot-workspace'
+import { BOT_MANAGEMENT_ROUTES } from '@/utils/bot-management-route'
+import { useBotProfileDiscovery } from '@/composables/useBotProfileDiscovery'
 
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
 const profiles = useProfilesStore()
+const { refresh } = useBotProfileDiscovery()
 const chat = useChatStore()
 const showIdentity = ref(false)
 const editingProfile = ref<HermesProfile | null>(null)
@@ -24,6 +27,10 @@ const showConfig = ref(false)
 const showTools = ref(false)
 const canManage = computed(() => isStoredSuperAdmin())
 const tools = computed(() => [
+  { label: t('sidebar.skills'), key: 'hermes.skills' },
+  { label: t('sidebar.jobs'), key: 'hermes.jobs' },
+  { label: t('botWorkspace.sharedKanban'), key: 'hermes.kanban' },
+  { type: 'divider' as const, key: 'bot-tools-divider' },
   { label: t('botWorkspace.otherAgents'), key: 'hermes.chat' },
   { label: t('sidebar.groupChat'), key: 'hermes.groupChat' },
   { label: t('sidebar.workflow'), key: 'hermes.workflow' },
@@ -34,6 +41,8 @@ const tools = computed(() => [
   { label: t('sidebar.usage'), key: 'hermes.usage' },
   { label: t('sidebar.apiRelay'), key: 'hermes.apiRelay' },
   { label: t('sidebar.settings'), key: 'hermes.settings' },
+  { type: 'divider' as const, key: 'discovery-divider' },
+  { label: t('botWorkspace.refreshBots'), key: 'refresh-bots', disabled: profiles.loading },
 ])
 function selectProfile(name: string) {
   showIdentity.value = false
@@ -51,10 +60,12 @@ function status(profile: string) {
 }
 function openTool(name: string | number) {
   showTools.value = false
-  void router.push({ name: String(name), ...(name === 'hermes.chat' ? { query: { studio: '1' } } : {}) })
+  if (name === 'refresh-bots') { void refresh(); return }
+  const query = name === 'hermes.chat' ? { studio: '1' }
+    : BOT_MANAGEMENT_ROUTES.has(String(name)) ? { profile: profiles.activeProfileName || 'default' } : undefined
+  void router.push({ name: String(name), query })
 }
 watch(() => profiles.profiles.map(profile => profile.name), names => { void chat.observeProfiles(names) }, { immediate: true })
-onMounted(() => { void profiles.fetchProfiles() })
 </script>
 <template>
   <aside class="bot-sidebar" :class="{ 'bot-sidebar--collapsed': botRosterCollapsed }" :aria-label="t('botWorkspace.bots')">

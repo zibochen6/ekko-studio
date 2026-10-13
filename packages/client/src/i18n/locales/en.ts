@@ -2,6 +2,9 @@ import { socialMessagesEn } from '../social-messages'
 
 export default {
   botWorkspace: {
+    refreshBots: "Refresh local Bots",
+    sharedKanban: "Shared board",
+    sharedKanbanHint: "A shared board for all Bots. Filter by assignee to see one Bot’s tasks.",
     workingDirectory: 'Working directory',
     "bots": "Bots",
     "personalWorkspace": "PERSONAL WORKSPACE",

@@ -28,6 +28,9 @@ const writeApprovalMessages = {
 
 export default {
   botWorkspace: {
+    refreshBots: "Yerel Botları yeniden tara",
+    sharedKanban: "Ortak pano",
+    sharedKanbanHint: "Tüm Botların ortak panosu. Bir Botun görevlerini görmek için sorumluya göre filtreleyin.",
     workingDirectory: 'Çalışma dizini',
     "bots": "Asistanlar",
     "personalWorkspace": "KİŞİSEL ÇALIŞMA ALANI",

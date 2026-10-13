@@ -2,6 +2,9 @@ import { socialMessagesRu } from '../social-messages-locales'
 
 export default {
   botWorkspace: {
+    refreshBots: "Обновить локальных ботов",
+    sharedKanban: "Общая доска",
+    sharedKanbanHint: "Общая доска для всех ботов. Фильтр по исполнителю покажет задачи отдельного бота.",
     workingDirectory: 'Рабочий каталог',
     "bots": "Помощники",
     "personalWorkspace": "ЛИЧНОЕ ПРОСТРАНСТВО",
